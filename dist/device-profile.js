@@ -10,6 +10,7 @@ const connectionSchema = z
     id: z.string().uuid(),
     label: z.string().trim().min(1).max(80),
     provider: providerKindSchema,
+    provider_account: z.string().trim().min(1).max(200).nullable().default(null),
     remote: z.string().min(1),
     library: z.string().min(1),
     created_at: z.string().datetime(),

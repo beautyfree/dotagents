@@ -10,18 +10,34 @@ export interface SkillDiscoveryLocation {
     agent?: string;
     kind: DiscoveryLocationKind;
 }
+/**
+ * A source found from the skill's own local Git checkout. This is deliberately
+ * read from Git metadata, not from an app-specific sidecar file, so every
+ * dotagents consumer sees the same provenance.
+ */
+export interface DiscoveredGitSource {
+    package: string;
+    url: string;
+    /** The checked-out immutable commit, suitable for a portable dependency. */
+    ref: string;
+    skillPath: string;
+    source: "git";
+}
 export interface DiscoveredSkill {
     candidateKey: string;
     name: string;
     description: string | null;
     whenToUse: string | null;
     integrity: string;
+    /** Portable, copy-compatible hash for clients that materialize this skill. */
+    exportHash: string;
     fileCount: number;
     bytes: number;
     /** Machine-local source. Renderer adapters must redact this field. */
     sourcePath: string;
     locations: SkillDiscoveryLocation[];
     metadataValid: boolean;
+    gitSource?: DiscoveredGitSource;
 }
 export interface DiscoveryCollision {
     name: string;

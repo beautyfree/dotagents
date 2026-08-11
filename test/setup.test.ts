@@ -22,6 +22,25 @@ function skill(root: string, name: string): void {
 }
 
 describe("guided setup", () => {
+  it("discovers a direct global agent install even when the agent has no configuration beyond its skills", async () => {
+    const home = mkdtempSync(join(tmpdir(), "dotagents-setup-direct-agent-"));
+    roots.push(home);
+    const library = join(home, ".agents");
+    const agentSkill = join(home, ".claude", "skills", "direct-writing");
+    mkdirSync(agentSkill, { recursive: true });
+    writeFileSync(
+      join(agentSkill, "SKILL.md"),
+      "---\nname: direct-writing\ndescription: Installed directly for Claude.\n---\n# Direct writing\n",
+    );
+
+    const plan = await planSetup({ root: library, home, platform: "linux", environment: { PATH: "" } });
+
+    expect(plan.summary).toMatchObject({ skillsFound: 1, owned: 1 });
+    expect(plan.candidates).toContainEqual(
+      expect.objectContaining({ kind: "owned", skill: "direct-writing", agents: ["claude-code"] }),
+    );
+  });
+
   it("adopts an explicitly reviewed skill already in a new canonical library", async () => {
     const home = mkdtempSync(join(tmpdir(), "dotagents-setup-home-"));
     roots.push(home);

@@ -88,6 +88,26 @@ describe("reviewed unmanaged resource adoption", () => {
     expect(readFileSync(path.join(current.library, "commands/review.md"), "utf8")).toBe("user-owned\n");
   });
 
+  test("never adopts a resource over a portable or device control file", async () => {
+    const current = fixture("MIT");
+    for (const target of ["skills.lock", "dotagents.scope.json", "dotagents.local.yaml"]) {
+      await expect(
+        planResourceAdoption({
+          libraryRoot: current.library,
+          sourcePath: current.source,
+          visibility: "private",
+          descriptor: {
+            kind: "command",
+            id: "review",
+            path: target,
+            format: "markdown",
+            invocation: "review",
+          },
+        }),
+      ).rejects.toThrow("non-reserved portable library path");
+    }
+  });
+
   test("rejects changed source bytes after review", async () => {
     const current = fixture("MIT");
     const plan = await command(current.source, current.library, "public");

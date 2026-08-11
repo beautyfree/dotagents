@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanLibrary } from "../src/inventory.js";
+import { planSkillExport } from "../src/export-policy.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -37,6 +38,9 @@ describe("library inventory", () => {
     if (first.ok && second.ok) {
       expect(first.value.ownedSkills[0]).toMatchObject({ name: "writing", fileCount: 2 });
       expect(first.value.ownedSkills[0]?.integrity).toBe(second.value.ownedSkills[0]?.integrity);
+      expect(first.value.ownedSkills[0]?.exportHash).toBe(
+        planSkillExport("writing", join(root, "skills/writing")).sha256,
+      );
     }
   });
 

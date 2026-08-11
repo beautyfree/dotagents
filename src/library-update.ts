@@ -105,6 +105,13 @@ type LibraryUpdateJournal = {
   entries: LibraryUpdateJournalEntry[];
 };
 
+export interface LibraryUpdateRecoveryPreview {
+  kind: "library-update";
+  phase: LibraryUpdateJournal["phase"];
+  itemCount: number;
+  changedItemCount: number;
+}
+
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -385,6 +392,27 @@ function rollbackLibraryUpdate(filePath: string, journal: LibraryUpdateJournal):
 
 export function hasLibraryUpdateRecovery(journalPath: string): boolean {
   return existsSync(journalPath);
+}
+
+/**
+ * Describe an interrupted library update without exposing machine paths or
+ * file contents. Callers can show the scope of recovery before asking the
+ * user to roll it back.
+ */
+export function inspectLibraryUpdateRecovery(journalPath: string): LibraryUpdateRecoveryPreview | null {
+  if (!existsSync(journalPath)) return null;
+  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as LibraryUpdateJournal;
+  if (journal.kind !== "library-update" || journal.schemaVersion !== LIBRARY_UPDATE_JOURNAL_VERSION) {
+    throw new Error("Unsupported library update journal");
+  }
+  return {
+    kind: "library-update",
+    phase: journal.phase,
+    itemCount: journal.entries.length,
+    changedItemCount: journal.entries.filter((entry) =>
+      ["backing-up", "backed-up", "committing", "applied"].includes(entry.status),
+    ).length,
+  };
 }
 
 /** Recover a completed or interrupted update without deleting later user edits. */

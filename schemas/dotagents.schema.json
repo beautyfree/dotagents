@@ -51,7 +51,8 @@
                 "type": "string",
                 "enum": [
                   "dependency",
-                  "vendored"
+                  "vendored",
+                  "snapshot"
                 ]
               },
               "origin": {
@@ -87,6 +88,41 @@
                   "skill_path",
                   "integrity",
                   "license"
+                ],
+                "additionalProperties": false
+              },
+              "snapshot": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "requested_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "skill_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "integrity": {
+                    "type": "string",
+                    "pattern": "^sha256-[A-Za-z0-9+/]+={0,2}$"
+                  },
+                  "resolved_commit": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}$"
+                  }
+                },
+                "required": [
+                  "url",
+                  "requested_ref",
+                  "skill_path",
+                  "integrity"
                 ],
                 "additionalProperties": false
               }

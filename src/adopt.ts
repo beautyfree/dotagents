@@ -12,13 +12,16 @@ import {
 import { normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
 import { type ResourceDescriptor, type ResourceManifest, resourceManifestSchema } from "./resource-model.js";
+import { SCOPE_DESCRIPTOR_FILE } from "./scope.js";
 
 export const RESOURCE_MANIFEST_FILE = "resources.json";
 const MAX_ADOPTED_FILE_BYTES = 1024 * 1024;
 const RESERVED_ROOTS = new Set([
   ".dotagents",
   "dotagents.yaml",
-  "skills-lock.json",
+  "dotagents.local.yaml",
+  SCOPE_DESCRIPTOR_FILE,
+  "skills.lock",
   "skills.json",
   RESOURCE_MANIFEST_FILE,
 ]);

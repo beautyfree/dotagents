@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,7 +85,7 @@ describe("cross-agent skill discovery", () => {
   it("uses verified provenance as a dependency suggestion", async () => {
     const root = temp();
     createSkill(root, "review");
-    const report = await discoverSkills([{ path: root, kind: "agent-local", agent: "claude-code" }]);
+    const report = await discoverSkills([{ path: root, kind: "shared" }]);
     const skill = report.skills[0];
     if (!skill) throw new Error("fixture skill was not discovered");
     const candidates = suggestImportCandidates(report, [
@@ -107,8 +108,60 @@ describe("cross-agent skill discovery", () => {
         ref: "main",
         skillPath: ".",
         source: "skills-cli",
-        agents: ["claude-code"],
       },
     ]);
+  });
+
+  it("discovers portable Git provenance without an application sidecar", async () => {
+    const root = temp();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    execFileSync("git", ["init"], { cwd: repository });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repository });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repository });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/example/review-tools.git"], {
+      cwd: repository,
+    });
+    createSkill(join(repository, "skills"), "review");
+    execFileSync("git", ["add", "."], { cwd: repository });
+    execFileSync("git", ["commit", "-m", "fixture"], { cwd: repository });
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+
+    const report = await discoverSkills([{ path: join(repository, "skills"), kind: "shared" }]);
+    expect(report.skills[0]?.gitSource).toMatchObject({
+      url: "https://github.com/example/review-tools",
+      ref: commit,
+      skillPath: "skills/review",
+      source: "git",
+    });
+    expect(suggestImportCandidates(report)).toEqual([
+      expect.objectContaining({
+        kind: "dependency",
+        skill: "review",
+        url: "https://github.com/example/review-tools",
+        ref: commit,
+        skillPath: "skills/review",
+        source: "git",
+      }),
+    ]);
+  });
+
+  it("does not let a shared Skills CLI lock reclassify a direct agent-local copy", async () => {
+    const root = temp();
+    createSkill(root, "review");
+    const report = await discoverSkills([{ path: root, kind: "agent-local", agent: "codex" }]);
+
+    expect(
+      suggestImportCandidates(report, [
+        {
+          skill: "review",
+          package: "review-tools",
+          url: "https://github.com/example/review-tools.git",
+          ref: "main",
+          skillPath: ".",
+          source: "skills-cli",
+        },
+      ]),
+    ).toEqual([expect.objectContaining({ kind: "owned", skill: "review", agents: ["codex"] })]);
   });
 });

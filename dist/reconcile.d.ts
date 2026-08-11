@@ -24,6 +24,9 @@ export type ReconciliationTargetSnapshot = {
     kind: "directory";
     integrity: string;
 } | {
+    kind: "linked-directory";
+    linkedPaths: string[];
+} | {
     kind: "symlink";
     linkTarget: string;
 } | {
@@ -70,12 +73,16 @@ export interface TakeRemoteDecision {
 }
 export interface ApplyLibraryReconciliationOptions {
     journalPath?: string;
+    /** Device-local history store. Targets remain rooted at plan.targetRoot. */
+    historyRoot?: string;
+    historyOperation?: string;
     /** Test/UI seam. Throwing rolls back every earlier operation. */
     beforeOperation?: (operation: LibraryReconciliationOperation, index: number) => void;
 }
 export interface ApplyLibraryReconciliationResult {
     planId: string;
     restored: string[];
+    historyId?: string;
 }
 export declare const LIBRARY_RECONCILIATION_JOURNAL_VERSION: 1;
 /**

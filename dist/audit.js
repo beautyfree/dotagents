@@ -8,26 +8,50 @@ const secretRules = [
     { id: "github-token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g },
     { id: "provider-token", pattern: /\b(?:sk-ant-|sk-(?:proj-)?)[A-Za-z0-9_-]{20,}\b/g },
     { id: "aws-access-key", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
-    { id: "connection-string", pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^/\s:@]+:[^/\s@]+@/gi },
+    {
+        id: "connection-string",
+        pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^/\s:@]+:[^/\s@]+@[^/\s:]+(?::\d+)?/gi,
+    },
 ];
-function isDocumentedConnectionExample(line) {
-    return /(?:\b(?:placeholder|sample|replace(?:\s+me)?|your[_ -]?(?:database|password|url|credential)|real values?)\b|\be\.g\.)/i.test(line);
+function isDocumentedConnectionExample(line, matchedUri, fencedExample) {
+    if (/(?:\b(?:placeholder|sample|replace(?:\s+me)?|your[_ -]?(?:database|password|url|credential)|real values?)\b|\be\.g\.)/i.test(line))
+        return true;
+    // Documentation commonly uses syntactically valid connection URLs so that
+    // examples can be copied and edited. Treat only unmistakable placeholder
+    // credentials as examples; realistic or unknown credentials still block.
+    if (!fencedExample)
+        return false;
+    const credentials = /^[a-z][a-z0-9+.-]*:\/\/([^:/\s@]+):([^/\s@]+)@([^/:\s]+)/i.exec(matchedUri);
+    if (!credentials)
+        return false;
+    const placeholderUser = /^(?:user(?:name)?|postgres|root|admin|db|database|example|demo|test|your[_-]?user(?:name)?)$/i;
+    const placeholderPassword = /^(?:pass(?:word)?|postgres|root|admin|secret|token|changeme|replace[_-]?me|your[_-]?(?:pass(?:word)?|secret)|example|demo|test)$/i;
+    const placeholderHost = /^(?:localhost|127\.0\.0\.1|db|database|host|hostname|(?:db|database)\.example(?:\.(?:com|org|net))?|example\.(?:com|org|net))$/i;
+    // Requiring all three parts to look synthetic avoids hiding a real secret
+    // merely because a production username happens to be `admin` or `postgres`.
+    return (placeholderUser.test(credentials[1] ?? "") &&
+        placeholderPassword.test(credentials[2] ?? "") &&
+        placeholderHost.test(credentials[3] ?? ""));
 }
 /** Returns locations and rule IDs only; matched values never cross the API boundary. */
 export function scanTextForSecrets(text) {
     const findings = [];
     const lines = text.split(/\r?\n/);
+    let fencedExample = false;
     for (const [lineIndex, line] of lines.entries()) {
+        const fence = /^\s*```/.test(line);
         for (const rule of secretRules) {
             rule.pattern.lastIndex = 0;
             let match = rule.pattern.exec(line);
             while (match !== null) {
-                if (rule.id !== "connection-string" || !isDocumentedConnectionExample(line)) {
+                if (rule.id !== "connection-string" || !isDocumentedConnectionExample(line, match[0], fencedExample)) {
                     findings.push({ rule: rule.id, line: lineIndex + 1, column: match.index + 1 });
                 }
                 match = rule.pattern.exec(line);
             }
         }
+        if (fence)
+            fencedExample = !fencedExample;
     }
     return findings;
 }

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { scanTextForSecrets } from "./audit.js";
-import { normalizePortablePath } from "./paths.js";
+import { isMachineLocalMetadataPath, normalizePortablePath } from "./paths.js";
 export const DEFAULT_SKILL_EXPORT_LIMITS = {
     maxFiles: 1_000,
     maxBytes: 50 * 1024 * 1024,
@@ -36,6 +36,10 @@ export function planSkillExport(skill, sourcePath, limits = DEFAULT_SKILL_EXPORT
             const relativePath = path.relative(root, absolutePath).replaceAll(path.sep, "/");
             if (normalizePortablePath(relativePath) !== relativePath)
                 throw new Error(`Skill export contains an unsafe path: ${relativePath}`);
+            if (isMachineLocalMetadataPath(relativePath)) {
+                excludedPaths.push(relativePath);
+                continue;
+            }
             const entry = lstatSync(absolutePath);
             if (entry.isSymbolicLink())
                 throw new Error(`Skill export rejects symlink: ${relativePath}`);

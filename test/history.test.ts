@@ -36,6 +36,8 @@ describe("durable local operation history", () => {
     expect(undo.hasConflicts).toBe(false);
     expect(applyOperationUndo(library, undo).restored).toEqual(["note.md"]);
     expect(existsSync(path.join(library, "note.md"))).toBe(false);
+    expect(readOperationHistory(library, applied.historyId).undone_at).toBeString();
+    expect(() => planOperationUndo(library, applied.historyId)).toThrow(/already been undone/i);
   });
 
   test("restores replaced content but rejects a target edited after the operation", () => {
@@ -90,5 +92,28 @@ describe("durable local operation history", () => {
     }
     expect(listOperationHistory(library).map((entry) => entry.id)).toEqual(["record-2", "record-1"]);
     expect(existsSync(operationHistoryRecordPath(library, "record-0"))).toBe(false);
+  });
+
+  test("stores history separately from a device-local target root", () => {
+    const historyRoot = root();
+    const targetRoot = root();
+    writeFileSync(path.join(targetRoot, "note.md"), "created\n", "utf8");
+    const sha256 = new Bun.CryptoHasher("sha256").update("created\n").digest("hex");
+    const record = writeOperationHistory(historyRoot, {
+      operation: "restore",
+      sourcePlanId: "a".repeat(64),
+      targetRoot,
+      changes: [
+        {
+          path: "note.md",
+          itemKind: "file",
+          postcondition: { kind: "file", sha256 },
+        },
+      ],
+    });
+    expect(record.target_root).toBe(targetRoot);
+    const undo = planOperationUndo(historyRoot, record.id);
+    expect(applyOperationUndo(historyRoot, undo).restored).toEqual(["note.md"]);
+    expect(existsSync(path.join(targetRoot, "note.md"))).toBe(false);
   });
 });

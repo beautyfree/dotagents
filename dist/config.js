@@ -35,12 +35,72 @@ const vendoredOriginSchema = z
         });
     }
 });
+const snapshotOriginSchema = z
+    .object({
+    url: z.string().min(1).max(2_048),
+    requested_ref: z.string().min(1).max(256),
+    skill_path: z.string().min(1).max(2_048),
+    integrity: z.string().regex(/^sha256-[A-Za-z0-9+/]+={0,2}$/),
+    resolved_commit: z
+        .string()
+        .regex(/^[a-f0-9]{40}$/)
+        .optional(),
+})
+    .strict()
+    .superRefine((origin, context) => {
+    try {
+        normalizeGitIdentity(origin.url);
+    }
+    catch (error) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["url"],
+            message: error instanceof Error ? error.message : "Invalid Git identity",
+        });
+    }
+    if (origin.skill_path !== "." && !normalizeSkillPath(origin.skill_path)) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["skill_path"],
+            message: "Snapshot skill path must be '.' or stay inside the source repository",
+        });
+    }
+});
+/** The public upstream of an independently editable fork. Never includes a local path or credentials. */
+const forkOriginSchema = z
+    .object({
+    url: z.string().min(1).max(2_048),
+    ref: z.string().min(1).max(256).optional(),
+    skill_path: z.string().min(1).max(2_048).optional(),
+})
+    .strict()
+    .superRefine((origin, context) => {
+    try {
+        normalizeGitIdentity(origin.url);
+    }
+    catch (error) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["url"],
+            message: error instanceof Error ? error.message : "Invalid Git identity",
+        });
+    }
+    if (origin.skill_path && origin.skill_path !== "." && !normalizeSkillPath(origin.skill_path)) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["skill_path"],
+            message: "Fork skill path must be '.' or stay inside the source repository",
+        });
+    }
+});
 const portableSkillPolicySchema = z
     .object({
     include: z.boolean().optional(),
     agents: z.array(slug).min(1).optional(),
-    distribution: z.enum(["dependency", "vendored"]).optional(),
+    distribution: z.enum(["dependency", "vendored", "snapshot"]).optional(),
     origin: vendoredOriginSchema.optional(),
+    snapshot: snapshotOriginSchema.optional(),
+    forked_from: forkOriginSchema.optional(),
 })
     .strict()
     .superRefine((policy, context) => {
@@ -56,6 +116,20 @@ const portableSkillPolicySchema = z
             code: z.ZodIssueCode.custom,
             path: ["origin"],
             message: "Origin metadata is allowed only for an explicitly vendored skill",
+        });
+    }
+    if (policy.distribution === "snapshot" && !policy.snapshot) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["snapshot"],
+            message: "Snapshot skills require source, requested ref, path, and integrity metadata",
+        });
+    }
+    if (policy.snapshot && policy.distribution !== "snapshot") {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["snapshot"],
+            message: "Snapshot metadata is allowed only for an explicitly snapshotted skill",
         });
     }
 });

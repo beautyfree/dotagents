@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { computeSkillIntegrity, type IntegrityFile } from "./integrity.js";
 import type { DotagentsIssue, DotagentsResult } from "./issues.js";
 import { loadLibrary } from "./library.js";
+import { isMachineLocalMetadataPath } from "./paths.js";
 import { parse } from "yaml";
 
 export interface ScanLimits {
@@ -24,10 +26,22 @@ export interface OwnedSkillInventory {
   fileCount: number;
   bytes: number;
   integrity: string;
+  /**
+   * Stable portable bundle hash used by clients which copy owned skill files.
+   * It intentionally excludes machine-local dotagents metadata.
+   */
+  exportHash?: string;
   /** Present for verified dependency cache entries; absent for owned skills. */
   sourceRoot?: string;
   sourceKind?: "dependency";
   dependency?: string;
+}
+
+function computePortableExportHash(files: IntegrityFile[]): string {
+  const entries = files
+    .filter((file) => !isMachineLocalMetadataPath(file.path))
+    .map((file) => `${file.path}\0${createHash("sha256").update(file.content).digest("hex")}`);
+  return createHash("sha256").update(entries.join("\n")).digest("hex");
 }
 
 export interface LibraryInventory {
@@ -77,7 +91,10 @@ async function collectSkillFiles(
         directory,
       );
     }
-    entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+    // Keep this byte ordering identical to export-policy's readdirSync().sort()
+    // traversal. The resulting exportHash is compared to existing libraries,
+    // so a locale-aware ordering here would create false local modifications.
+    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
       const relative = path.relative(skillRoot, absolute).replaceAll(path.sep, "/");
@@ -248,6 +265,7 @@ export async function scanOwnedSkill(
       fileCount: collected.value.files.length,
       bytes: collected.value.bytes,
       integrity: computeSkillIntegrity(collected.value.files),
+      exportHash: computePortableExportHash(collected.value.files),
     },
     issues: [],
   };

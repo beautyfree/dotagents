@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
+import { normalizeGitIdentity } from "./git-identity.js";
 import { scanOwnedSkill } from "./inventory.js";
 export const DEFAULT_DISCOVERY_LIMITS = { maxDepth: 8, maxDirectories: 20_000 };
 function metadata(text) {
@@ -39,6 +40,68 @@ async function exists(filePath) {
         if (error.code === "ENOENT")
             return false;
         throw error;
+    }
+}
+function sourcePackageName(url) {
+    const pathname = url
+        .replace(/\\/g, "/")
+        .replace(/\.git$/i, "")
+        .split("/")
+        .filter(Boolean)
+        .at(-1) ?? "source";
+    const stem = portableKey(pathname);
+    return `git-${stem}-${createHash("sha256").update(url).digest("hex").slice(0, 8)}`;
+}
+function originUrl(config) {
+    const start = /^\s*\[remote "origin"\]\s*$/im.exec(config);
+    const remainder = start ? config.slice((start.index ?? 0) + start[0].length) : "";
+    const nextSection = remainder.search(/^\s*\[/m);
+    const section = nextSection < 0 ? remainder : remainder.slice(0, nextSection);
+    const value = section ? /^\s*url\s*=\s*(.+?)\s*$/im.exec(section)?.[1]?.trim() : undefined;
+    if (!value)
+        return null;
+    try {
+        return normalizeGitIdentity(value);
+    }
+    catch {
+        // Credentials or an unsupported URL must never become portable metadata.
+        return null;
+    }
+}
+async function gitSourceForSkill(skillRoot) {
+    let directory = skillRoot;
+    for (;;) {
+        const gitPath = path.join(directory, ".git");
+        try {
+            const gitStat = await lstat(gitPath);
+            if (!gitStat.isDirectory())
+                return null;
+            const [config, head] = await Promise.all([
+                readFile(path.join(gitPath, "config"), "utf8"),
+                readFile(path.join(gitPath, "HEAD"), "utf8"),
+            ]);
+            const url = originUrl(config);
+            if (!url)
+                return null;
+            const headValue = head.trim();
+            const ref = headValue.startsWith("ref: ")
+                ? (await readFile(path.join(gitPath, headValue.slice("ref: ".length).trim()), "utf8")).trim()
+                : headValue;
+            if (!/^[a-f0-9]{40,64}$/i.test(ref))
+                return null;
+            const relative = path.relative(directory, skillRoot).replaceAll(path.sep, "/") || ".";
+            if (relative.startsWith("../") || path.isAbsolute(relative))
+                return null;
+            return { package: sourcePackageName(url), url, ref, skillPath: relative, source: "git" };
+        }
+        catch (error) {
+            if (error.code !== "ENOENT")
+                return null;
+        }
+        const parent = path.dirname(directory);
+        if (parent === directory)
+            return null;
+        directory = parent;
     }
 }
 async function internalSkillMarkdownAlias(skillRoot, discoveryRoot) {
@@ -105,6 +168,24 @@ async function collectRoots(root, limits) {
     await visit(root.path, 0);
     return { paths, aliases, issues };
 }
+async function mapWithConcurrency(values, limit, work) {
+    const results = new Array(values.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(limit, values.length) }, async () => {
+        for (;;) {
+            const index = nextIndex;
+            nextIndex += 1;
+            if (index >= values.length)
+                return;
+            const value = values[index];
+            if (value === undefined)
+                return;
+            results[index] = await work(value);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
 /**
  * Read-only cross-agent discovery. Byte-identical aliases are one skill with
  * multiple locations; same-name content differences remain explicit conflicts.
@@ -114,6 +195,7 @@ export async function discoverSkills(roots, limits = DEFAULT_DISCOVERY_LIMITS) {
     const issues = [];
     let linkedAliases = 0;
     const sortedRoots = [...roots].sort((left, right) => `${left.kind}:${left.agent ?? ""}:${left.path}`.localeCompare(`${right.kind}:${right.agent ?? ""}:${right.path}`, "en"));
+    const candidates = [];
     for (const root of sortedRoots) {
         if (!(await exists(root.path)))
             continue;
@@ -127,43 +209,67 @@ export async function discoverSkills(roots, limits = DEFAULT_DISCOVERY_LIMITS) {
         }
         linkedAliases += collected.aliases;
         issues.push(...collected.issues);
-        for (const candidate of collected.paths) {
-            let actual;
-            try {
-                actual = await realpath(candidate);
-            }
-            catch {
-                issues.push(issue("file-not-found", "A discovered skill path no longer resolves.", "Refresh discovery after repairing the path.", candidate));
-                continue;
-            }
+        for (const candidate of collected.paths)
+            candidates.push({ candidate, root });
+    }
+    const scannedCandidates = await mapWithConcurrency(candidates, 12, async ({ candidate, root }) => {
+        try {
+            const actual = await realpath(candidate);
             const scanned = await scanOwnedSkill(path.dirname(actual), path.basename(actual));
-            if (!scanned.ok) {
-                issues.push(...scanned.issues.map((entry) => ({ ...entry, severity: "warning" })));
-                continue;
-            }
-            const frontmatter = metadata(await readFile(path.join(actual, "SKILL.md"), "utf8"));
-            const name = frontmatter.name?.trim() || path.basename(actual);
-            const validName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name);
-            const existing = byIntegrity.get(scanned.value.integrity);
-            const location = { kind: root.kind, ...(root.agent ? { agent: root.agent } : {}) };
-            if (existing) {
-                if (!existing.locations.some((entry) => entry.kind === location.kind && entry.agent === location.agent))
-                    existing.locations.push(location);
-                continue;
-            }
-            byIntegrity.set(scanned.value.integrity, {
-                candidateKey: portableKey(name),
-                name,
-                description: frontmatter.description,
-                whenToUse: frontmatter.whenToUse,
-                integrity: scanned.value.integrity,
-                fileCount: scanned.value.fileCount,
-                bytes: scanned.value.bytes,
-                sourcePath: actual,
-                locations: [location],
-                metadataValid: validName && frontmatter.name === name,
-            });
+            if (!scanned.ok)
+                return { root, candidate, issues: scanned.issues.map((entry) => ({ ...entry, severity: "warning" })) };
+            return {
+                root,
+                candidate,
+                actual,
+                scanned: scanned.value,
+                frontmatter: metadata(await readFile(path.join(actual, "SKILL.md"), "utf8")),
+                gitSource: await gitSourceForSkill(actual),
+            };
         }
+        catch {
+            return {
+                root,
+                candidate,
+                issues: [
+                    issue("file-not-found", "A discovered skill path no longer resolves.", "Refresh discovery after repairing the path.", candidate),
+                ],
+            };
+        }
+    });
+    for (const result of scannedCandidates) {
+        if ("issues" in result) {
+            issues.push(...result.issues);
+            continue;
+        }
+        const { root, actual, scanned, frontmatter, gitSource } = result;
+        if (!scanned.exportHash) {
+            issues.push(issue("io-error", "Could not calculate this skill's portable content hash.", "Refresh discovery after checking the skill files.", actual));
+            continue;
+        }
+        const name = frontmatter.name?.trim() || path.basename(actual);
+        const validName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name);
+        const existing = byIntegrity.get(scanned.integrity);
+        const location = { kind: root.kind, ...(root.agent ? { agent: root.agent } : {}) };
+        if (existing) {
+            if (!existing.locations.some((entry) => entry.kind === location.kind && entry.agent === location.agent))
+                existing.locations.push(location);
+            continue;
+        }
+        byIntegrity.set(scanned.integrity, {
+            candidateKey: portableKey(name),
+            name,
+            description: frontmatter.description,
+            whenToUse: frontmatter.whenToUse,
+            integrity: scanned.integrity,
+            exportHash: scanned.exportHash,
+            fileCount: scanned.fileCount,
+            bytes: scanned.bytes,
+            sourcePath: actual,
+            locations: [location],
+            metadataValid: validName && frontmatter.name === name,
+            ...(gitSource ? { gitSource } : {}),
+        });
     }
     const skills = [...byIntegrity.values()].sort((left, right) => left.name.localeCompare(right.name, "en"));
     for (const skill of skills)
@@ -199,7 +305,13 @@ export function suggestImportCandidates(report, provenance = []) {
                     : "SKILL.md metadata needs review",
             };
         }
-        const source = provenance.find((entry) => entry.skill === skill.name && (!entry.integrity || entry.integrity === skill.integrity));
+        // The Skills CLI global lock describes the canonical shared store. Do not
+        // let a same-named direct install in an agent folder be silently replaced
+        // by that provenance: it may be an independent local modification.
+        const hasCanonicalSharedLocation = skill.locations.some((location) => location.kind === "shared");
+        const source = hasCanonicalSharedLocation
+            ? (provenance.find((entry) => entry.skill === skill.name && (!entry.integrity || entry.integrity === skill.integrity)) ?? skill.gitSource)
+            : skill.gitSource;
         const agents = [...new Set(skill.locations.flatMap((location) => (location.agent ? [location.agent] : [])))].sort();
         if (source)
             return {

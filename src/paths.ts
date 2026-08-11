@@ -2,6 +2,19 @@ import path from "node:path";
 
 const windowsReservedName = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
+// Finder, Windows Explorer, and similar file managers can create these files
+// inside a skill folder without the person using the library doing anything.
+// They are device metadata, never part of a portable agent library.
+const machineLocalMetadataNames = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+export function isMachineLocalMetadataPath(input: string): boolean {
+  return input
+    .replaceAll("\\", "/")
+    .replace(/^\.\//, "")
+    .split("/")
+    .some((segment) => machineLocalMetadataNames.has(segment));
+}
+
 export function normalizePortablePath(input: string): string | null {
   const normalized = input.replaceAll("\\", "/");
   if (

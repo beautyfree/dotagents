@@ -6,7 +6,7 @@
     {
       "subpath": ".",
       "types": "./dist/index.d.ts",
-      "sha256": "68f5314bbc4a7cff9d95b93458e0cfc94084f0096149809521fad11843474664"
+      "sha256": "ec89b793f2d5d00f7bfb14f1ee3fcc4f27427938d1cb4baaa065e3ed75991ee5"
     },
     {
       "subpath": "./adapters/skills-cli",
@@ -29,6 +29,11 @@
       "sha256": "e5c555a4dbae213d08284d67f91d426a36fea1cb4301d692dd342ec734e81a8b"
     },
     {
+      "subpath": "./canonical-library",
+      "types": "./dist/canonical-library.d.ts",
+      "sha256": "b1f874b7d13493414a20df576336e690195c4fc6e403026b7baef43ee4226198"
+    },
+    {
       "subpath": "./catalog",
       "types": "./dist/catalog.d.ts",
       "sha256": "3a7101d009512357745f5d802fabb3398a7228fb32d74d91eecf24a738b17a82"
@@ -41,17 +46,17 @@
     {
       "subpath": "./config",
       "types": "./dist/config.d.ts",
-      "sha256": "c40a9b28ed889fc2843b579468c70cc1092bb6d9c01b66794d18cbf314ee09bf"
+      "sha256": "6939ff5ed0068a454dd26bda666cbbad6665e77fd808af88d7ec7c0cd104ff0c"
     },
     {
       "subpath": "./decisions",
       "types": "./dist/decisions.d.ts",
-      "sha256": "df9a3a776b685da8fd82a87976d230413257fed7230e4c89ff8eb0f80e10b55c"
+      "sha256": "e4eb380b9169b223d114a416c037d29547135c77161eb3028c3848a55ff7a0e4"
     },
     {
       "subpath": "./discovery",
       "types": "./dist/discovery.d.ts",
-      "sha256": "682b9c80d0cb3d50b7120b7c77de68352066d185decc9af2724caa1154c6cd82"
+      "sha256": "20e1f3a410305bac078be2f27e852866d1a77c4443fbdcd49fdbe89e09e3681d"
     },
     {
       "subpath": "./doctor",
@@ -66,17 +71,17 @@
     {
       "subpath": "./git-fast-forward",
       "types": "./dist/git-fast-forward.d.ts",
-      "sha256": "cec0d24699824bf49f593115ca6046be890d78b7b3c5c6a71ed962df542c3ae6"
+      "sha256": "5280a16d132256661763a4d3115e870e812383bea162e0c6b45a03b8ecf03eb7"
     },
     {
       "subpath": "./git-workspace",
       "types": "./dist/git-workspace.d.ts",
-      "sha256": "ecb0380e73b331f4b7c6b27fc00210680d49880042af3930114055ffd74535ea"
+      "sha256": "7f97d0ef9321ddffcfdae6eef74ceeae26dded3ac8ce8eaa416ebd0ad4364cd0"
     },
     {
       "subpath": "./history",
       "types": "./dist/history.d.ts",
-      "sha256": "5d1b028e0bd94dc5cecf81d63e4e9ab8fb81bc8f41e99c6cf4716f90004f3a3f"
+      "sha256": "e46848e8021918462b67e9c9742e91201e3fe47cd885ff2d940a311a5c3084e5"
     },
     {
       "subpath": "./import",
@@ -101,7 +106,7 @@
     {
       "subpath": "./inventory",
       "types": "./dist/inventory.d.ts",
-      "sha256": "8d153a856e22ee98a28213cc6184f2e7ff75b98ba5bf611c360db7a2985f469d"
+      "sha256": "85a2e3ea028997bf048759f67720810822ea43caa2134b84e8bd3f5d3831be9b"
     },
     {
       "subpath": "./library",
@@ -109,9 +114,14 @@
       "sha256": "fe3e4f8ee084d2ba2b708bd78e441576c1c60c9e76c2bbca5114f79ec518d326"
     },
     {
+      "subpath": "./library-publish",
+      "types": "./dist/library-publish.d.ts",
+      "sha256": "31d49bf0a32735a0f9ff2abea449b007db56a18baf8b2e883b5132c155ab088d"
+    },
+    {
       "subpath": "./library-update",
       "types": "./dist/library-update.d.ts",
-      "sha256": "32a49355883bfc204cc80a4fbd7d36ec9eee549fd830fa4cc5b4b3e25bb55517"
+      "sha256": "fece8a761cb0dd45d47d79d6cedaf0539b2e3416fdf0a04aee148bf9b2db88ea"
     },
     {
       "subpath": "./machine",
@@ -136,7 +146,7 @@
     {
       "subpath": "./reconcile",
       "types": "./dist/reconcile.d.ts",
-      "sha256": "8c6eeb34c0b1a9ea8e43a604ce55529f2dce631167198b78a605d0bc26aa68f0"
+      "sha256": "a4100a9829fa1f53d15069f14a6e01bbecef14decbd33fefa997d19e9ae98f1f"
     },
     {
       "subpath": "./repair",
@@ -169,9 +179,24 @@
       "sha256": "40cc0e565f7651f8d4c301dc74a5012d3e26fac038d5d7b1a197da4bf35a3776"
     },
     {
+      "subpath": "./source-migration",
+      "types": "./dist/source-migration.d.ts",
+      "sha256": "5f611295d902f84a66485c7aea4b1e5fbf766b4372707454e6392885933f314b"
+    },
+    {
       "subpath": "./source-policy",
       "types": "./dist/source-policy.d.ts",
       "sha256": "77435639a992c589980c669add6c219de7a429aff5e5af0eb619f4b5ce582f96"
+    },
+    {
+      "subpath": "./source-registry",
+      "types": "./dist/source-registry.d.ts",
+      "sha256": "97b5b5cd93d2a8bc1bc63e71b9c0a245e635b3287d327b8996b80c3ac02a41d1"
+    },
+    {
+      "subpath": "./source-session",
+      "types": "./dist/source-session.d.ts",
+      "sha256": "615bafe6850cd5a64468e47ebf841ed9d28c71b7c392992890c62ce14f70b23a"
     },
     {
       "subpath": "./sources",
@@ -182,6 +207,11 @@
       "subpath": "./status",
       "types": "./dist/status.d.ts",
       "sha256": "f96ea8d305d2c5657e01c6fd3670965e9c0d442a9d11d2e5d74daceb50364900"
+    },
+    {
+      "subpath": "./toolkit-review",
+      "types": "./dist/toolkit-review.d.ts",
+      "sha256": "4006c25037045e34dd7720636229b1da3bed8bf0f0fd0a31db178cbabfce694b"
     },
     {
       "subpath": "./well-known",

@@ -36,7 +36,7 @@ export function planInitializeLibrary(root: string, requestedName = path.basenam
     },
     {
       path: ".gitignore",
-      content: "dotagents.local.yaml\n.dotagents/\n",
+      content: "dotagents.local.yaml\n.dotagents/\n.DS_Store\nThumbs.db\ndesktop.ini\n",
     },
     {
       path: "README.md",

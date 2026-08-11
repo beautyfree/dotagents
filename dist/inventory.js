@@ -1,13 +1,21 @@
+import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { computeSkillIntegrity } from "./integrity.js";
 import { loadLibrary } from "./library.js";
+import { isMachineLocalMetadataPath } from "./paths.js";
 import { parse } from "yaml";
 export const DEFAULT_SCAN_LIMITS = {
     maxFilesPerSkill: 1_000,
     maxFileBytes: 10 * 1024 * 1024,
     maxSkillBytes: 50 * 1024 * 1024,
 };
+function computePortableExportHash(files) {
+    const entries = files
+        .filter((file) => !isMachineLocalMetadataPath(file.path))
+        .map((file) => `${file.path}\0${createHash("sha256").update(file.content).digest("hex")}`);
+    return createHash("sha256").update(entries.join("\n")).digest("hex");
+}
 export function declaredSkillName(skillMd) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(skillMd.replace(/^\uFEFF/, ""));
     if (!match)
@@ -35,7 +43,10 @@ async function collectSkillFiles(skillRoot, limits) {
         catch {
             return issue("io-error", `Could not read skill directory ${directory}.`, "Check permissions and retry.", directory);
         }
-        entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+        // Keep this byte ordering identical to export-policy's readdirSync().sort()
+        // traversal. The resulting exportHash is compared to existing libraries,
+        // so a locale-aware ordering here would create false local modifications.
+        entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
         for (const entry of entries) {
             const absolute = path.join(directory, entry.name);
             const relative = path.relative(skillRoot, absolute).replaceAll(path.sep, "/");
@@ -152,6 +163,7 @@ export async function scanOwnedSkill(root, skillPath, limits = DEFAULT_SCAN_LIMI
             fileCount: collected.value.files.length,
             bytes: collected.value.bytes,
             integrity: computeSkillIntegrity(collected.value.files),
+            exportHash: computePortableExportHash(collected.value.files),
         },
         issues: [],
     };

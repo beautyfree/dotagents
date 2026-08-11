@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync, } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync, } from "node:fs";
 import path from "node:path";
 import { planSkillExport } from "./export-policy.js";
+import { removeOperationHistory, writeOperationHistory } from "./history.js";
+import { isMachineLocalMetadataPath, normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
-import { normalizePortablePath } from "./paths.js";
 /** Pure three-way classification. It never chooses an overwrite for unknown local state. */
 export function classifyThreeWaySkill(id, baseSha256, localSha256, remoteSha256, keptRemoteSha256) {
-    if (keptRemoteSha256 && localSha256 !== null && localSha256 !== remoteSha256) {
+    if (keptRemoteSha256 && localSha256 !== remoteSha256) {
         return {
             id,
             baseSha256,
@@ -48,6 +49,32 @@ function assertPortableSkillPath(value) {
 function sha256File(filePath) {
     return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
+/**
+ * A skill may be represented by a normal directory whose SKILL.md or another
+ * file is a local link.  Do not let an export error erase that distinction:
+ * links are a deliberate device-local composition and must never be followed
+ * or overwritten implicitly.
+ */
+function linkedPathsInSkill(root) {
+    const links = [];
+    const visit = (directory) => {
+        for (const name of readdirSync(directory).sort()) {
+            const entryPath = path.join(directory, name);
+            const relativePath = path.relative(root, entryPath).replaceAll(path.sep, "/");
+            if (isMachineLocalMetadataPath(relativePath) || name === ".git" || name === "node_modules")
+                continue;
+            const metadata = lstatSync(entryPath);
+            if (metadata.isSymbolicLink()) {
+                links.push(relativePath);
+                continue;
+            }
+            if (metadata.isDirectory())
+                visit(entryPath);
+        }
+    };
+    visit(root);
+    return links;
+}
 function targetSnapshot(skill, target) {
     if (!existsSync(target))
         return { kind: "absent" };
@@ -58,6 +85,9 @@ function targetSnapshot(skill, target) {
         return { kind: "file", sha256: sha256File(target) };
     if (!metadata.isDirectory())
         return { kind: "unsupported", description: "unsupported filesystem entry" };
+    const linkedPaths = linkedPathsInSkill(target);
+    if (linkedPaths.length > 0)
+        return { kind: "linked-directory", linkedPaths };
     try {
         return { kind: "directory", integrity: planSkillExport(skill, target).sha256 };
     }
@@ -71,6 +101,13 @@ function targetSnapshot(skill, target) {
 function classifyReconciliationOperation(skill, snapshot, remoteIntegrity, base) {
     if (snapshot.kind === "absent") {
         if (base?.baseIntegrity) {
+            if (base.keptRemoteIntegrity === remoteIntegrity) {
+                return {
+                    action: "kept-local",
+                    localIntegrity: null,
+                    reason: "This skill is intentionally absent on this device",
+                };
+            }
             return {
                 action: "conflict",
                 localIntegrity: null,
@@ -80,12 +117,40 @@ function classifyReconciliationOperation(skill, snapshot, remoteIntegrity, base)
         return { action: "take-remote", localIntegrity: null };
     }
     if (snapshot.kind !== "directory") {
+        // A machine may intentionally materialize a shared skill through a link.
+        // We must never follow or overwrite that link implicitly, but a library
+        // revision that is unchanged since the recorded base needs no decision.
+        // If the remote changes later, this still falls through to a conflict so
+        // the user explicitly chooses whether to replace the link.
+        if (snapshot.kind === "symlink" && base?.baseIntegrity === remoteIntegrity) {
+            return {
+                action: "unchanged",
+                localIntegrity: null,
+                reason: "This skill is linked locally; the saved library version has not changed",
+            };
+        }
+        if (snapshot.kind === "linked-directory" && base?.baseIntegrity === remoteIntegrity) {
+            return {
+                action: "unchanged",
+                localIntegrity: null,
+                reason: "This skill has linked local files; the saved library version has not changed",
+            };
+        }
+        if (base?.baseIntegrity && base.keptRemoteIntegrity === remoteIntegrity) {
+            return {
+                action: "kept-local",
+                localIntegrity: null,
+                reason: "This local item is intentionally left untouched on this device",
+            };
+        }
         return {
             action: "conflict",
             localIntegrity: null,
             reason: snapshot.kind === "unsupported"
                 ? snapshot.description
-                : `The local target is a ${snapshot.kind}, not a reviewed skill directory`,
+                : snapshot.kind === "linked-directory"
+                    ? `The local skill contains linked file${snapshot.linkedPaths.length === 1 ? "" : "s"}: ${snapshot.linkedPaths.join(", ")}`
+                    : `The local target is a ${snapshot.kind}, not a reviewed skill directory`,
         };
     }
     const classified = classifyThreeWaySkill(skill, base?.baseIntegrity ?? null, snapshot.integrity, remoteIntegrity, base?.keptRemoteIntegrity);
@@ -224,6 +289,8 @@ function rollbackReconciliation(filePath, journal) {
             rmSync(entry.operation.target, { recursive: true, force: true });
         }
     }
+    if (journal.history)
+        removeOperationHistory(journal.history.root, journal.history.id);
     rmSync(filePath, { force: true });
 }
 export function hasLibraryReconciliationRecovery(journalPath) {
@@ -274,8 +341,8 @@ export function applyLibraryReconciliationPlan(plan, decisions, options = {}) {
         if (operation.action === "unchanged") {
             throw new Error(`Remote skill does not need applying: ${decision.skill}`);
         }
-        if (operation.expectedTarget.kind === "unsupported") {
-            throw new Error(`Local target cannot be replaced safely: ${decision.skill}. ${operation.expectedTarget.description}`);
+        if (operation.expectedTarget.kind === "unsupported" || operation.expectedTarget.kind === "linked-directory") {
+            throw new Error(`Local target cannot be replaced safely: ${decision.skill}. ${operation.expectedTarget.kind === "linked-directory" ? `It contains linked file${operation.expectedTarget.linkedPaths.length === 1 ? "" : "s"}: ${operation.expectedTarget.linkedPaths.join(", ")}` : operation.expectedTarget.description}`);
         }
     }
     const operations = plan.operations.filter((operation) => selected.has(operation.skill));
@@ -324,6 +391,29 @@ export function applyLibraryReconciliationPlan(plan, decisions, options = {}) {
             entry.status = "applied";
             writeJournal(journalPath, journal);
         }
+        let historyId;
+        if (options.historyRoot) {
+            historyId = `reconcile-${nonce}`;
+            journal.history = { root: path.resolve(options.historyRoot), id: historyId };
+            writeJournal(journalPath, journal);
+            writeOperationHistory(journal.history.root, {
+                operation: options.historyOperation ?? "restore-library-skills",
+                sourcePlanId: planId,
+                recordId: historyId,
+                targetRoot: plan.targetRoot,
+                changes: journal.entries.map((entry) => ({
+                    path: entry.operation.skill,
+                    itemKind: "skill",
+                    skill: entry.operation.skill,
+                    postcondition: { kind: "directory", integrity: entry.operation.remoteIntegrity },
+                    ...(entry.hadPrevious && entry.operation.expectedTarget.kind === "directory"
+                        ? { previousPath: entry.backupPath }
+                        : entry.hadPrevious
+                            ? { previousUnavailableReason: "unsupported-previous-target" }
+                            : {}),
+                })),
+            });
+        }
         journal.phase = "completed";
         writeJournal(journalPath, journal);
         for (const entry of journal.entries) {
@@ -331,7 +421,7 @@ export function applyLibraryReconciliationPlan(plan, decisions, options = {}) {
             rmSync(entry.backupPath, { recursive: true, force: true });
         }
         rmSync(journalPath, { force: true });
-        return { planId, restored: operations.map((operation) => operation.skill) };
+        return { planId, restored: operations.map((operation) => operation.skill), ...(historyId ? { historyId } : {}) };
     }
     catch (error) {
         rollbackReconciliation(journalPath, journal);

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createServer, type Socket } from "node:net";
 import {
   applyLibraryClone,
   applyGitClonePlan,
@@ -20,6 +21,8 @@ import {
   planLibraryGitInitialization,
   planLibraryPull,
   planLibraryPush,
+  NodeWorkspaceGitPort,
+  type WorkspaceGitPort,
 } from "../src/git-workspace.js";
 import { applyInitializeLibraryPlan, planInitializeLibrary } from "../src/init.js";
 import { exactSourceSecurityPolicy } from "../src/source-policy.js";
@@ -47,6 +50,47 @@ function addSkill(root: string, name: string, body = "portable\n"): void {
 }
 
 describe("Git-backed library workspace", () => {
+  it("forwards review cancellation to the active Git command", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "dotagents-git-cancel-"));
+    roots.push(parent);
+    const remote = "https://example.com/team/library.git";
+    const controller = new AbortController();
+    controller.abort();
+    const git: WorkspaceGitPort = {
+      async run(_args, _cwd, options) {
+        expect(options?.signal).toBe(controller.signal);
+        throw new DOMException("Review cancelled", "AbortError");
+      },
+    };
+
+    await expect(
+      planGitCheckout(remote, join(parent, "library"), "HEAD", exactSourceSecurityPolicy([remote]), git, {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("terminates a hanging Git process when its review is cancelled", async () => {
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => sockets.add(socket));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test port");
+    const controller = new AbortController();
+    const pending = new NodeWorkspaceGitPort().run(
+      ["ls-remote", `git://127.0.0.1:${address.port}/library.git`],
+      process.cwd(),
+      { nonInteractive: true, signal: controller.signal },
+    );
+    setTimeout(() => controller.abort(), 50);
+    try {
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
   it("initializes Git only after its repository and remote preconditions are reviewed", async () => {
     const parent = mkdtempSync(join(tmpdir(), "dotagents-git-init-plan-"));
     roots.push(parent);
@@ -95,6 +139,16 @@ describe("Git-backed library workspace", () => {
     expect(plan.resolvedCommit).toMatch(/^[a-f0-9]{40}$/);
     expect(plan.committedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(existsSync(target)).toBe(false);
+    const cancelledTarget = join(parent, "cancelled-library");
+    const cancelledPlan = await planLibraryClone(pathToFileURL(remote).href, cancelledTarget, policy);
+    const applyController = new AbortController();
+    applyController.abort();
+    await expect(applyLibraryClone(cancelledPlan, undefined, { signal: applyController.signal })).rejects.toMatchObject(
+      {
+        name: "AbortError",
+      },
+    );
+    expect(existsSync(cancelledTarget)).toBe(false);
     await expect(applyLibraryClone({ ...plan, destination: `${target}-changed` })).rejects.toThrow("stale or modified");
     await applyLibraryClone(plan);
     expect(readFileSync(join(target, "skills/portable/SKILL.md"), "utf8")).toContain("portable");
@@ -195,6 +249,32 @@ describe("Git-backed library workspace", () => {
     expect(plan.files.map((file) => file.path)).toContain("skills/writing/SKILL.md");
     expect(await applyLibraryCommit(plan)).toMatch(/^[a-f0-9]{40}$/);
     expect((await getLibraryGitStatus(library)).changed).toBe(false);
+
+    // Finder metadata can appear in any nested skill directory. It must remain
+    // local and must never turn a portable-library sync into a blocked review.
+    writeFileSync(join(library, "skills", "writing", ".DS_Store"), "finder metadata\n");
+    const finderMetadata = await planLibraryCommit(library, "Ignore Finder metadata");
+    expect(finderMetadata.hasBlockers).toBe(false);
+    expect(finderMetadata.files).toEqual([]);
+    expect(await applyLibraryCommit(finderMetadata)).toBeNull();
+    expect((await getLibraryGitStatus(library)).changed).toBe(false);
+
+    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"personal"}\n');
+    const scope = await planLibraryCommit(library, "Add portable scope");
+    expect(scope.hasBlockers).toBe(false);
+    expect(scope.files.map((file) => file.path)).toContain("dotagents.scope.json");
+    await applyLibraryCommit(scope);
+
+    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"everywhere"}\n');
+    const invalidScope = await planLibraryCommit(library, "Invalid portable scope");
+    expect(invalidScope.hasBlockers).toBe(true);
+    expect(invalidScope.auditErrors).toContainEqual(
+      expect.objectContaining({
+        code: "invalid-scope-descriptor",
+        field: "dotagents.scope.json",
+      }),
+    );
+    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"personal"}\n');
 
     writeFileSync(join(library, ".env"), "TOKEN=secret\n");
     const unsafe = await planLibraryCommit(library, "Unsafe file");

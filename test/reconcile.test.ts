@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { planSkillExport } from "../src/export-policy.js";
+import { applyOperationUndo, listOperationHistory, planOperationUndo } from "../src/history.js";
 import {
   applyLibraryReconciliationPlan,
   hasLibraryReconciliationRecovery,
+  type LibraryReconciliationPlan,
   planLibraryReconciliation,
   recoverLibraryReconciliation,
-  type LibraryReconciliationPlan,
 } from "../src/reconcile.js";
 
 const roots: string[] = [];
@@ -64,6 +65,26 @@ describe("library reconciliation", () => {
     expect(readFileSync(path.join(current.targetRoot, "writing", "SKILL.md"), "utf8")).toBe("# Remote\n");
   });
 
+  it("records a restorable activity entry in a separate device-local history root", () => {
+    const current = fixture();
+    const review = plan(current);
+    const historyRoot = path.join(current.root, "history-store");
+    const applied = applyLibraryReconciliationPlan(review, [{ skill: "writing", action: "take-remote" }], {
+      historyRoot,
+      historyOperation: "restore-library-skills",
+    });
+    expect(applied.historyId).toBeString();
+    expect(listOperationHistory(historyRoot)).toMatchObject([
+      { operation: "restore-library-skills", target_root: current.targetRoot, undo_available: true },
+    ]);
+
+    if (!applied.historyId) throw new Error("reconciliation history was not created");
+    const undo = planOperationUndo(historyRoot, applied.historyId);
+    expect(undo.hasConflicts).toBe(false);
+    expect(applyOperationUndo(historyRoot, undo).restored).toEqual(["writing"]);
+    expect(existsSync(path.join(current.targetRoot, "writing"))).toBe(false);
+  });
+
   it("classifies local, remote, concurrent, kept-local, and unmanaged state", () => {
     const current = fixture();
     const target = path.join(current.targetRoot, "writing");
@@ -82,6 +103,129 @@ describe("library reconciliation", () => {
       "kept-local",
     );
     expect(plan(current).operations[0]?.action).toBe("unmanaged");
+  });
+
+  it("remembers a reviewed decision to keep a managed skill absent on this device", () => {
+    const current = fixture();
+    const source = current.sources[0];
+    if (!source) throw new Error("fixture produced no source");
+
+    const firstReview = plan(current, { writing: { baseIntegrity: source.integrity } });
+    expect(firstReview.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "conflict",
+      localIntegrity: null,
+      expectedTarget: { kind: "absent" },
+    });
+
+    const remembered = plan(current, {
+      writing: { baseIntegrity: source.integrity, keptRemoteIntegrity: source.integrity },
+    });
+    expect(remembered.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "kept-local",
+      localIntegrity: null,
+      expectedTarget: { kind: "absent" },
+    });
+  });
+
+  it("remembers a reviewed decision to leave a non-directory local item untouched", () => {
+    const current = fixture();
+    const source = current.sources[0];
+    if (!source) throw new Error("fixture produced no source");
+    mkdirSync(current.targetRoot, { recursive: true });
+    writeFileSync(path.join(current.targetRoot, "writing"), "not a skill directory\n");
+
+    const firstReview = plan(current, { writing: { baseIntegrity: source.integrity } });
+    expect(firstReview.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "conflict",
+      localIntegrity: null,
+      expectedTarget: { kind: "file" },
+    });
+
+    const remembered = plan(current, {
+      writing: { baseIntegrity: source.integrity, keptRemoteIntegrity: source.integrity },
+    });
+    expect(remembered.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "kept-local",
+      localIntegrity: null,
+      expectedTarget: { kind: "file" },
+    });
+  });
+
+  it("does not ask again for an unchanged remote skill materialized as a local symlink", () => {
+    const current = fixture();
+    const source = current.sources[0];
+    if (!source) throw new Error("fixture produced no source");
+    mkdirSync(current.targetRoot, { recursive: true });
+    const linkedSource = path.join(current.root, "linked-writing");
+    mkdirSync(linkedSource);
+    writeFileSync(path.join(linkedSource, "SKILL.md"), "# Linked local version\n");
+    symlinkSync(linkedSource, path.join(current.targetRoot, "writing"), "dir");
+
+    expect(plan(current, { writing: { baseIntegrity: source.integrity } }).operations[0]).toMatchObject({
+      skill: "writing",
+      action: "unchanged",
+      localIntegrity: null,
+      expectedTarget: { kind: "symlink" },
+    });
+
+    writeFileSync(path.join(current.sourceRoot, "skills", "writing", "SKILL.md"), "# Remote changed\n");
+    const changed = planLibraryReconciliation({
+      sourceRoot: current.sourceRoot,
+      targetRoot: current.targetRoot,
+      skills: [
+        {
+          id: source.id,
+          path: source.path,
+          integrity: planSkillExport(source.id, path.join(current.sourceRoot, source.path)).sha256,
+        },
+      ],
+      base: { writing: { baseIntegrity: source.integrity } },
+    });
+    expect(changed.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "conflict",
+      expectedTarget: { kind: "symlink" },
+    });
+  });
+
+  it("does not flag a linked SKILL.md again until the saved library version changes", () => {
+    const current = fixture();
+    const source = current.sources[0];
+    if (!source) throw new Error("fixture produced no source");
+    const target = path.join(current.targetRoot, "writing");
+    mkdirSync(target, { recursive: true });
+    const linkedSkill = path.join(current.root, "linked-SKILL.md");
+    writeFileSync(linkedSkill, "# Linked local version\n");
+    symlinkSync(linkedSkill, path.join(target, "SKILL.md"), "file");
+
+    expect(plan(current, { writing: { baseIntegrity: source.integrity } }).operations[0]).toMatchObject({
+      skill: "writing",
+      action: "unchanged",
+      expectedTarget: { kind: "linked-directory", linkedPaths: ["SKILL.md"] },
+    });
+
+    writeFileSync(path.join(current.sourceRoot, "skills", "writing", "SKILL.md"), "# Remote changed\n");
+    const changed = planLibraryReconciliation({
+      sourceRoot: current.sourceRoot,
+      targetRoot: current.targetRoot,
+      skills: [
+        {
+          id: source.id,
+          path: source.path,
+          integrity: planSkillExport(source.id, path.join(current.sourceRoot, source.path)).sha256,
+        },
+      ],
+      base: { writing: { baseIntegrity: source.integrity } },
+    });
+    expect(changed.operations[0]).toMatchObject({
+      skill: "writing",
+      action: "conflict",
+      expectedTarget: { kind: "linked-directory" },
+    });
   });
 
   it("requires an explicit choice for an unmanaged target and protects preview preconditions", () => {

@@ -1,6 +1,6 @@
 {
   "name": "dotagents",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Carry your AI-agent skills and setup across machines with a portable, Git-backed library",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,10 @@
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js"
     },
+    "./canonical-library": {
+      "types": "./dist/canonical-library.d.ts",
+      "import": "./dist/canonical-library.js"
+    },
     "./scope": {
       "types": "./dist/scope.d.ts",
       "import": "./dist/scope.js"
@@ -86,6 +90,10 @@
       "types": "./dist/library.d.ts",
       "import": "./dist/library.js"
     },
+    "./library-publish": {
+      "types": "./dist/library-publish.d.ts",
+      "import": "./dist/library-publish.js"
+    },
     "./integrity": {
       "types": "./dist/integrity.d.ts",
       "import": "./dist/integrity.js"
@@ -93,6 +101,10 @@
     "./inventory": {
       "types": "./dist/inventory.d.ts",
       "import": "./dist/inventory.js"
+    },
+    "./toolkit-review": {
+      "types": "./dist/toolkit-review.d.ts",
+      "import": "./dist/toolkit-review.js"
     },
     "./export-policy": {
       "types": "./dist/export-policy.d.ts",
@@ -174,6 +186,26 @@
       "types": "./dist/source-policy.d.ts",
       "import": "./dist/source-policy.js"
     },
+    "./source-session": {
+      "types": "./dist/source-session.d.ts",
+      "import": "./dist/source-session.js"
+    },
+    "./source-migration": {
+      "types": "./dist/source-migration.d.ts",
+      "import": "./dist/source-migration.js"
+    },
+    "./source-registry": {
+      "types": "./dist/source-registry.d.ts",
+      "import": "./dist/source-registry.js"
+    },
+    "./skill-evolution": {
+      "types": "./dist/skill-evolution.d.ts",
+      "import": "./dist/skill-evolution.js"
+    },
+    "./skill-fork": {
+      "types": "./dist/skill-fork.d.ts",
+      "import": "./dist/skill-fork.js"
+    },
     "./git-workspace": {
       "types": "./dist/git-workspace.d.ts",
       "import": "./dist/git-workspace.js"
@@ -220,6 +252,7 @@
     "release:check": "bun run ci && bun run package:check && bun run package:smoke && bun run api:check"
   },
   "dependencies": {
+    "@napi-rs/keyring": "^1.3.0",
     "yaml": "^2.8.3",
     "zod": "^3.24.0"
   },

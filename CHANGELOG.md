@@ -4,6 +4,22 @@ All notable changes to `dotagents` are recorded here. The project follows semant
 
 ## Unreleased
 
+## [0.3.0] - 2026-08-11
+
+### Added
+
+- Native GitHub Device Flow, OS credential-vault storage, and provider-session
+  primitives so setup and sync do not depend on `gh` or `glab`.
+- Canonical-library, publish-plan, source-registry, source-migration,
+  toolkit-review, skill-evolution, and skill-fork APIs for applications that
+  present a library UI on top of dotagents.
+
+### Changed
+
+- Provider setup now reuses the saved native connection to discover writable
+  libraries and synchronize without repeatedly asking for a remote URL or
+  local folder.
+
 ## [0.2.0] - 2026-08-07
 
 ### Added

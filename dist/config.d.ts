@@ -33,20 +33,73 @@ declare const vendoredOriginSchema: z.ZodEffects<z.ZodObject<{
     integrity: string;
     skill_path: string;
 }>;
+declare const snapshotOriginSchema: z.ZodEffects<z.ZodObject<{
+    url: z.ZodString;
+    requested_ref: z.ZodString;
+    skill_path: z.ZodString;
+    integrity: z.ZodString;
+    resolved_commit: z.ZodOptional<z.ZodString>;
+}, "strict", z.ZodTypeAny, {
+    url: string;
+    requested_ref: string;
+    integrity: string;
+    skill_path: string;
+    resolved_commit?: string | undefined;
+}, {
+    url: string;
+    requested_ref: string;
+    integrity: string;
+    skill_path: string;
+    resolved_commit?: string | undefined;
+}>, {
+    url: string;
+    requested_ref: string;
+    integrity: string;
+    skill_path: string;
+    resolved_commit?: string | undefined;
+}, {
+    url: string;
+    requested_ref: string;
+    integrity: string;
+    skill_path: string;
+    resolved_commit?: string | undefined;
+}>;
+/** The public upstream of an independently editable fork. Never includes a local path or credentials. */
+declare const forkOriginSchema: z.ZodEffects<z.ZodObject<{
+    url: z.ZodString;
+    ref: z.ZodOptional<z.ZodString>;
+    skill_path: z.ZodOptional<z.ZodString>;
+}, "strict", z.ZodTypeAny, {
+    url: string;
+    ref?: string | undefined;
+    skill_path?: string | undefined;
+}, {
+    url: string;
+    ref?: string | undefined;
+    skill_path?: string | undefined;
+}>, {
+    url: string;
+    ref?: string | undefined;
+    skill_path?: string | undefined;
+}, {
+    url: string;
+    ref?: string | undefined;
+    skill_path?: string | undefined;
+}>;
 export declare const portableConfigSchema: z.ZodObject<{
     schema_version: z.ZodLiteral<1>;
     minimum_dotagents_version: z.ZodOptional<z.ZodString>;
     defaults: z.ZodDefault<z.ZodObject<{
         include: z.ZodDefault<z.ZodEnum<["all", "owned", "selected"]>>;
     }, "strict", z.ZodTypeAny, {
-        include: "all" | "owned" | "selected";
+        include: "owned" | "all" | "selected";
     }, {
-        include?: "all" | "owned" | "selected" | undefined;
+        include?: "owned" | "all" | "selected" | undefined;
     }>>;
     skills: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodEffects<z.ZodObject<{
         include: z.ZodOptional<z.ZodBoolean>;
         agents: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-        distribution: z.ZodOptional<z.ZodEnum<["dependency", "vendored"]>>;
+        distribution: z.ZodOptional<z.ZodEnum<["dependency", "vendored", "snapshot"]>>;
         origin: z.ZodOptional<z.ZodEffects<z.ZodObject<{
             url: z.ZodString;
             commit: z.ZodString;
@@ -78,10 +131,69 @@ export declare const portableConfigSchema: z.ZodObject<{
             integrity: string;
             skill_path: string;
         }>>;
+        snapshot: z.ZodOptional<z.ZodEffects<z.ZodObject<{
+            url: z.ZodString;
+            requested_ref: z.ZodString;
+            skill_path: z.ZodString;
+            integrity: z.ZodString;
+            resolved_commit: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        }, {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        }>, {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        }, {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        }>>;
+        forked_from: z.ZodOptional<z.ZodEffects<z.ZodObject<{
+            url: z.ZodString;
+            ref: z.ZodOptional<z.ZodString>;
+            skill_path: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        }, {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        }>, {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        }, {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        }>>;
     }, "strict", z.ZodTypeAny, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -89,21 +201,45 @@ export declare const portableConfigSchema: z.ZodObject<{
             integrity: string;
             skill_path: string;
         } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        } | undefined;
     }, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
             commit: string;
             integrity: string;
             skill_path: string;
+        } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
         } | undefined;
     }>, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -111,24 +247,48 @@ export declare const portableConfigSchema: z.ZodObject<{
             integrity: string;
             skill_path: string;
         } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        } | undefined;
     }, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
             commit: string;
             integrity: string;
             skill_path: string;
+        } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
         } | undefined;
     }>>>;
 }, "strict", z.ZodTypeAny, {
     schema_version: 1;
     skills: Record<string, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -136,17 +296,29 @@ export declare const portableConfigSchema: z.ZodObject<{
             integrity: string;
             skill_path: string;
         } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        } | undefined;
     }>;
     defaults: {
-        include: "all" | "owned" | "selected";
+        include: "owned" | "all" | "selected";
     };
     minimum_dotagents_version?: string | undefined;
 }, {
     schema_version: 1;
     skills?: Record<string, {
         include?: boolean | undefined;
+        snapshot?: {
+            url: string;
+            requested_ref: string;
+            integrity: string;
+            skill_path: string;
+            resolved_commit?: string | undefined;
+        } | undefined;
         agents?: string[] | undefined;
-        distribution?: "dependency" | "vendored" | undefined;
+        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -154,10 +326,15 @@ export declare const portableConfigSchema: z.ZodObject<{
             integrity: string;
             skill_path: string;
         } | undefined;
+        forked_from?: {
+            url: string;
+            ref?: string | undefined;
+            skill_path?: string | undefined;
+        } | undefined;
     }> | undefined;
     minimum_dotagents_version?: string | undefined;
     defaults?: {
-        include?: "all" | "owned" | "selected" | undefined;
+        include?: "owned" | "all" | "selected" | undefined;
     } | undefined;
 }>;
 export declare const localConfigSchema: z.ZodObject<{
@@ -166,11 +343,11 @@ export declare const localConfigSchema: z.ZodObject<{
         selected: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         roots: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, "strict", z.ZodTypeAny, {
-        roots?: Record<string, string> | undefined;
         selected?: string[] | undefined;
+        roots?: Record<string, string> | undefined;
     }, {
-        roots?: Record<string, string> | undefined;
         selected?: string[] | undefined;
+        roots?: Record<string, string> | undefined;
     }>>;
     materialization: z.ZodOptional<z.ZodEnum<["auto", "native", "symlink", "junction", "copy"]>>;
     exclusions: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
@@ -223,8 +400,8 @@ export declare const localConfigSchema: z.ZodObject<{
     exclusions: string[];
     environment: Record<string, string>;
     agents?: {
-        roots?: Record<string, string> | undefined;
         selected?: string[] | undefined;
+        roots?: Record<string, string> | undefined;
     } | undefined;
     materialization?: "symlink" | "native" | "auto" | "junction" | "copy" | undefined;
     source_security?: {
@@ -241,8 +418,8 @@ export declare const localConfigSchema: z.ZodObject<{
 }, {
     schema_version: 1;
     agents?: {
-        roots?: Record<string, string> | undefined;
         selected?: string[] | undefined;
+        roots?: Record<string, string> | undefined;
     } | undefined;
     materialization?: "symlink" | "native" | "auto" | "junction" | "copy" | undefined;
     exclusions?: string[] | undefined;
@@ -261,6 +438,8 @@ export declare const localConfigSchema: z.ZodObject<{
 }>;
 export type PortableConfig = z.infer<typeof portableConfigSchema>;
 export type VendoredOrigin = z.infer<typeof vendoredOriginSchema>;
+export type SnapshotOrigin = z.infer<typeof snapshotOriginSchema>;
+export type ForkOrigin = z.infer<typeof forkOriginSchema>;
 export type LocalConfig = z.infer<typeof localConfigSchema>;
 export type ConfigProvenance = "portable" | "local";
 export interface EffectiveConfig {

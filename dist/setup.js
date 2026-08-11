@@ -52,7 +52,6 @@ export async function planSetup(options = {}) {
         home,
         ...(options.environment ? { environment: options.environment } : {}),
     });
-    const detected = new Set(machine.detectedSlugs);
     const roots = new Map();
     const addRoot = (entry) => {
         const key = `${entry.kind}:${entry.agent ?? ""}:${entry.path}`;
@@ -61,8 +60,11 @@ export async function planSetup(options = {}) {
     };
     addRoot({ path: path.join(root, "skills"), kind: "shared" });
     for (const agent of catalog) {
-        if (!detected.has(agent.slug))
-            continue;
+        // A Skills CLI global install may create only an agent's skill directory.
+        // That is deliberately not enough to call the agent installed, but it is
+        // still a real global skill location that must be visible to inventory.
+        // `discoverSkills` ignores missing roots, so scanning the full catalog is
+        // both read-only and bounded to known global paths.
         for (const skillRoot of agent.skillRoots)
             addRoot({ path: expand(skillRoot, home), kind: "agent-local", agent: agent.slug });
         for (const readableRoot of agent.readableRoots)

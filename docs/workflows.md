@@ -56,9 +56,10 @@ dotagents setup
 
 The setup flow either identifies the remote library before it writes
 `~/.agents`, or lets you review the exact name of a new private GitHub/GitLab
-library before it is created. GitHub/GitLab can list writable libraries through
-their already-signed-in CLI, so you can select an existing one instead of
-remembering its URL. It then safely connects compatible agents and refuses to
+library before it is created. GitHub/GitLab use one browser Device Flow sign-in,
+then keep its token in the operating system credential vault. You can select an
+existing library without remembering its URL, and later sync without `gh`,
+`glab`, a URL, or a folder argument. It then safely connects compatible agents and refuses to
 replace an existing library. A self-hosted server is configured by entering its
 credential-free Git URL once; later syncs reuse it locally.
 
@@ -90,8 +91,7 @@ complete policy and advanced options, run:
 dotagents --help
 ```
 
-This separation is intentional: provider sign-in or repository listing can use
-the provider's own CLI only after an interactive permission prompt (or the
-explicit `--allow-provider-network` automation flag). dotagents never fetches
-library content until an exact source has been selected and reviewed. An
-automated run cannot broaden content trust by accident.
+This separation is intentional: provider sign-in and repository listing happen
+only during interactive setup through the provider's native Device Flow.
+dotagents never fetches library content until an exact source has been selected
+and reviewed. An automated run cannot broaden content trust by accident.

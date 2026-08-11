@@ -282,6 +282,25 @@ function rollbackLibraryUpdate(filePath, journal) {
 export function hasLibraryUpdateRecovery(journalPath) {
     return existsSync(journalPath);
 }
+/**
+ * Describe an interrupted library update without exposing machine paths or
+ * file contents. Callers can show the scope of recovery before asking the
+ * user to roll it back.
+ */
+export function inspectLibraryUpdateRecovery(journalPath) {
+    if (!existsSync(journalPath))
+        return null;
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+    if (journal.kind !== "library-update" || journal.schemaVersion !== LIBRARY_UPDATE_JOURNAL_VERSION) {
+        throw new Error("Unsupported library update journal");
+    }
+    return {
+        kind: "library-update",
+        phase: journal.phase,
+        itemCount: journal.entries.length,
+        changedItemCount: journal.entries.filter((entry) => ["backing-up", "backed-up", "committing", "applied"].includes(entry.status)).length,
+    };
+}
 /** Recover a completed or interrupted update without deleting later user edits. */
 export function recoverLibraryUpdate(journalPath) {
     if (!existsSync(journalPath))

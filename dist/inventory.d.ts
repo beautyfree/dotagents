@@ -11,6 +11,11 @@ export interface OwnedSkillInventory {
     fileCount: number;
     bytes: number;
     integrity: string;
+    /**
+     * Stable portable bundle hash used by clients which copy owned skill files.
+     * It intentionally excludes machine-local dotagents metadata.
+     */
+    exportHash?: string;
     /** Present for verified dependency cache entries; absent for owned skills. */
     sourceRoot?: string;
     sourceKind?: "dependency";

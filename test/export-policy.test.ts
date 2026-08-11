@@ -23,6 +23,7 @@ function skillRoot(): string {
 describe("owned skill export policy", () => {
   it("produces a stable allowlisted plan without matched secret values", () => {
     const root = skillRoot();
+    writeFileSync(join(root, ".DS_Store"), "finder metadata\n");
     writeFileSync(join(root, "references", "private.md"), "TOKEN=ghp_abcdefghijklmnopqrstuvwxyz123456\n");
     const first = planSkillExport("writing", root);
     const second = planSkillExport("writing", root);
@@ -32,7 +33,7 @@ describe("owned skill export policy", () => {
       "references/private.md",
       "references/tone.md",
     ]);
-    expect(first.excludedPaths).toEqual([".git"]);
+    expect(first.excludedPaths).toEqual([".DS_Store", ".git"]);
     expect(first.secretFindings).toEqual([
       { relativePath: "references/private.md", rule: "github-token", line: 1, column: 7 },
     ]);

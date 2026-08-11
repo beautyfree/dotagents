@@ -73,7 +73,8 @@ describe("CLI materialization flow", () => {
   it("documents deny-by-default trust for every networked Git command", async () => {
     const help = await run("bun", ["src/cli.ts", "--help"], { cwd: join(import.meta.dir, "..") });
     expect(help.stdout).toContain("--provider github|gitlab");
-    expect(help.stdout).toContain("--allow-provider-network");
+    expect(help.stdout).toContain("one-time browser sign-in");
+    expect(help.stdout).toContain("no provider CLI is required");
     expect(help.stdout).toContain("sync [library-directory] [--pull|--push]");
     expect(help.stdout).toContain("Network access is denied");
     expect(help.stdout).toContain("--allow-local-sources");
@@ -89,14 +90,14 @@ describe("CLI materialization flow", () => {
     ).rejects.toMatchObject({ stderr: expect.stringContaining("--remote") });
   });
 
-  it("requires explicit provider-network permission before a non-interactive provider setup", async () => {
+  it("requires an interactive Device Flow before a provider setup", async () => {
     const root = mkdtempSync(join(tmpdir(), "dotagents-cli-provider-network-"));
     roots.push(root);
     await expect(
       run("bun", ["src/cli.ts", "setup", join(root, "library"), "--provider", "github", "--yes"], {
         cwd: join(import.meta.dir, ".."),
       }),
-    ).rejects.toMatchObject({ stderr: expect.stringContaining("--allow-provider-network") });
+    ).rejects.toMatchObject({ stderr: expect.stringContaining("interactively once") });
   });
 
   it("offers one guided setup command with a machine-readable preview", async () => {

@@ -57,10 +57,12 @@ Git server** and enter that server's Git URL once. After you answer `y`, it:
 3. connects compatible empty agent folders with links; and
 4. reports exactly what is now available.
 
-Choosing GitHub or GitLab first asks permission to let that provider's own CLI
-list writable repositories, so you can reuse an existing library without
-remembering its URL. This is separate from reviewing library content and from
-creating a remote; automated setup must opt in with `--allow-provider-network`.
+Choosing GitHub or GitLab opens a one-time browser sign-in using the provider's
+native Device Flow. The access token is kept in your operating system's
+credential vault (Keychain, Credential Manager, or Secret Service), never in a
+remote URL, Git config, or dotagents file. After that, `setup` can list your
+writable libraries and `sync` works without `gh`, `glab`, a URL, or a folder
+argument.
 
 If you install another agent later, run this to connect it without touching
 existing agent files:
@@ -100,7 +102,7 @@ Secret checks point to a file and line but never print the matched value.
 
 On a new computer, start with `dotagents setup`. Pick GitHub or GitLab and
 choose an existing repository, or review a new private library name before
-dotagents creates it through the provider CLI. For a company or self-hosted
+dotagents creates it through its native provider connection. For a company or self-hosted
 server, choose **Another Git server** and paste its Git URL once;
 dotagents saves that connection locally and will not ask again. The `--remote`
 option remains available for scripts and managed deployments. Before writing

@@ -60,6 +60,33 @@ source_security:
     expect(config.skills.toolkit?.origin).toMatchObject({ license: "MIT", skill_path: "skills/toolkit" });
   });
 
+  it("keeps portable provenance for a private source snapshot", () => {
+    const config = parsePortableConfig(
+      `schema_version: 1\nskills:\n  toolkit:\n    distribution: snapshot\n    snapshot:\n      url: https://github.com/example/toolkit.git\n      requested_ref: main\n      skill_path: skills/toolkit\n      integrity: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n`,
+    );
+    expect(config.skills.toolkit).toMatchObject({
+      distribution: "snapshot",
+      snapshot: { requested_ref: "main", skill_path: "skills/toolkit" },
+    });
+    expect(() => parsePortableConfig("schema_version: 1\nskills:\n  toolkit: { distribution: snapshot }\n")).toThrow(
+      "Snapshot skills require source",
+    );
+  });
+
+  it("allows portable fork attribution without turning an owned skill into a dependency", () => {
+    const config = parsePortableConfig(
+      `schema_version: 1
+skills:
+  writing:
+    forked_from:
+      url: https://github.com/example/writing.git
+      ref: ${"a".repeat(40)}
+      skill_path: skills/writing
+`,
+    );
+    expect(config.skills.writing?.forked_from).toMatchObject({ skill_path: "skills/writing" });
+  });
+
   it("intersects portable routing, private machine choice, and detected agents", () => {
     const portable = parsePortableConfig(
       "schema_version: 1\nskills:\n  writing: { agents: [claude-code, codex] }\n  shared: {}\n",
@@ -85,6 +112,25 @@ describe("shared safety primitives", () => {
     const findings = scanTextForSecrets(text);
     expect(findings).toEqual([{ rule: "github-token", line: 1, column: 7 }]);
     expect(JSON.stringify(findings)).not.toContain("ghp_");
+  });
+
+  it("ignores obvious connection examples without weakening real credential detection", () => {
+    expect(scanTextForSecrets("```env\nDATABASE_URL=postgres://user:pass@host/db\n```")).toEqual([]);
+    expect(scanTextForSecrets("```env\nDATABASE_URL=postgresql://postgres:password@localhost:5432/app\n```")).toEqual(
+      [],
+    );
+    expect(
+      scanTextForSecrets("```env\nDATABASE_URL=postgresql://root:root@database.example.com:5432/app\n```"),
+    ).toEqual([]);
+    expect(scanTextForSecrets("DATABASE_URL=postgres://user:password@db.example/app")).toEqual([
+      { rule: "connection-string", line: 1, column: 14 },
+    ]);
+    expect(
+      scanTextForSecrets("```env\nDATABASE_URL=postgres://admin:real-production-value@db.example.com/app\n```"),
+    ).toEqual([{ rule: "connection-string", line: 2, column: 14 }]);
+    expect(scanTextForSecrets("DATABASE_URL=postgres://prod_app:s3cur3-value@db.internal/app")).toEqual([
+      { rule: "connection-string", line: 1, column: 14 },
+    ]);
   });
 
   it("never overwrites unknown local content by default", () => {

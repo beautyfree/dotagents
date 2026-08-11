@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyGitFastForwardPlan, inspectGitFastForwardPlan, planGitFastForward } from "../src/git-fast-forward.js";
+import type { WorkspaceGitPort } from "../src/git-workspace.js";
 import { exactSourceSecurityPolicy } from "../src/source-policy.js";
 
 const roots: string[] = [];
@@ -27,6 +28,23 @@ function readText(repository: string): string {
 }
 
 describe("generic Git fast-forward review", () => {
+  it("forwards cancellation to the active Git review command", async () => {
+    const root = mkdtempSync(join(tmpdir(), "dotagents-fast-forward-cancel-"));
+    roots.push(root);
+    const controller = new AbortController();
+    controller.abort();
+    const gitPort: WorkspaceGitPort = {
+      async run(_args, _cwd, options) {
+        expect(options?.signal).toBe(controller.signal);
+        throw new DOMException("Review cancelled", "AbortError");
+      },
+    };
+
+    await expect(planGitFastForward(root, {}, gitPort, { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+
   it("inspects an exact remote commit without changing the worktree and rejects a stale apply", async () => {
     const root = mkdtempSync(join(tmpdir(), "dotagents-fast-forward-"));
     roots.push(root);

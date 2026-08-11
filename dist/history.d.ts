@@ -1,5 +1,5 @@
 import { z } from "zod";
-export declare const OPERATION_HISTORY_VERSION: 1;
+export declare const OPERATION_HISTORY_VERSION: 2;
 export declare const OPERATION_UNDO_JOURNAL_VERSION: 1;
 declare const snapshotSchema: z.ZodDiscriminatedUnion<"kind", [z.ZodObject<{
     kind: z.ZodLiteral<"absent">;
@@ -28,11 +28,12 @@ declare const snapshotSchema: z.ZodDiscriminatedUnion<"kind", [z.ZodObject<{
 }>]>;
 export type HistoryTargetSnapshot = z.infer<typeof snapshotSchema>;
 declare const operationHistoryRecordSchema: z.ZodObject<{
-    schema_version: z.ZodLiteral<1>;
+    schema_version: z.ZodLiteral<2>;
     id: z.ZodString;
     operation: z.ZodString;
     source_plan_id: z.ZodString;
     completed_at: z.ZodString;
+    target_root: z.ZodString;
     changes: z.ZodArray<z.ZodObject<{
         path: z.ZodString;
         itemKind: z.ZodEnum<["file", "skill"]>;
@@ -122,12 +123,12 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
             };
         }>, z.ZodObject<{
             kind: z.ZodLiteral<"unavailable">;
-            reason: z.ZodEnum<["sensitive-previous-content"]>;
+            reason: z.ZodEnum<["sensitive-previous-content", "unsupported-previous-target"]>;
         }, "strict", z.ZodTypeAny, {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         }, {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         }>]>;
     }, "strict", z.ZodTypeAny, {
@@ -157,7 +158,7 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 kind: "directory";
             };
         } | {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
@@ -188,18 +189,19 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 kind: "directory";
             };
         } | {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
     }>, "many">;
     undo_available: z.ZodBoolean;
 }, "strict", z.ZodTypeAny, {
-    schema_version: 1;
+    schema_version: 2;
     id: string;
     operation: string;
     source_plan_id: string;
     completed_at: string;
+    target_root: string;
     changes: {
         path: string;
         itemKind: "skill" | "file";
@@ -227,18 +229,19 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 kind: "directory";
             };
         } | {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
     }[];
     undo_available: boolean;
 }, {
-    schema_version: 1;
+    schema_version: 2;
     id: string;
     operation: string;
     source_plan_id: string;
     completed_at: string;
+    target_root: string;
     changes: {
         path: string;
         itemKind: "skill" | "file";
@@ -266,14 +269,17 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 kind: "directory";
             };
         } | {
-            reason: "sensitive-previous-content";
+            reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
     }[];
     undo_available: boolean;
 }>;
-export type OperationHistoryRecord = z.infer<typeof operationHistoryRecordSchema>;
+type StoredOperationHistoryRecord = z.infer<typeof operationHistoryRecordSchema>;
+export type OperationHistoryRecord = StoredOperationHistoryRecord & {
+    undone_at: string | null;
+};
 export interface OperationHistoryChangeInput {
     path: string;
     itemKind: "file" | "skill";
@@ -281,6 +287,8 @@ export interface OperationHistoryChangeInput {
     postcondition: HistoryTargetSnapshot;
     /** Transaction backup of the previous target. Absent means the target was newly created. */
     previousPath?: string;
+    /** Record a non-restorable previous target without copying or following it. */
+    previousUnavailableReason?: "unsupported-previous-target";
 }
 export interface WriteOperationHistoryInput {
     operation: string;
@@ -288,6 +296,8 @@ export interface WriteOperationHistoryInput {
     changes: OperationHistoryChangeInput[];
     completedAt?: Date;
     recordId?: string;
+    /** Device-local target root when history is stored somewhere else. */
+    targetRoot?: string;
     retention?: Partial<OperationHistoryRetention>;
 }
 export interface OperationHistoryRetention {
@@ -297,6 +307,7 @@ export interface OperationHistoryRetention {
 export declare const DEFAULT_OPERATION_HISTORY_RETENTION: OperationHistoryRetention;
 export declare function operationHistoryRoot(root: string): string;
 export declare function operationHistoryRecordPath(root: string, id: string): string;
+export declare function operationHistoryUndoMarkerPath(root: string, id: string): string;
 export declare function pruneOperationHistory(root: string, input?: Partial<OperationHistoryRetention>, preserveId?: string): void;
 /**
  * Persist a successful operation and its bounded inverse payload. The caller

@@ -7,27 +7,36 @@ import { promisify } from "node:util";
 import { auditLibrary, scanTextForSecrets } from "./audit.js";
 import { normalizeGitIdentity } from "./git-identity.js";
 import { loadLibrary } from "./library.js";
-import { normalizePortablePath } from "./paths.js";
+import { isMachineLocalMetadataPath, normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
 import { resourceManifestSchema, scanResourceManifest } from "./resource-model.js";
+import { SCOPE_DESCRIPTOR_FILE, readPortableScopeDescriptor } from "./scope.js";
 import { parseSourceSecurityPolicy, requireMinimumReleaseAge, requireTrustedSource, } from "./source-policy.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_BRANCH = "main";
 const GIT_NAME = "dotagents library";
 const GIT_EMAIL = "library@dotagents.local";
 export class NodeWorkspaceGitPort {
+    environment;
+    /**
+     * Extra process environment for one host-controlled Git transport. It is
+     * intentionally ephemeral: callers must never persist secrets in remotes or
+     * repository config.
+     */
+    constructor(environment = {}) {
+        this.environment = environment;
+    }
     async run(args, cwd, options = {}) {
         const result = await execFileAsync("git", args, {
             cwd,
             encoding: "utf8",
             maxBuffer: 10 * 1024 * 1024,
-            env: options.nonInteractive
-                ? {
-                    ...process.env,
-                    GIT_TERMINAL_PROMPT: "0",
-                    GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
-                }
-                : process.env,
+            signal: options.signal,
+            env: {
+                ...process.env,
+                ...this.environment,
+                ...(options.nonInteractive ? { GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" } : {}),
+            },
         });
         // Porcelain `-z` records can legitimately start with a space (for example
         // " M file"). Trimming those records corrupts both the status and path.
@@ -101,7 +110,10 @@ function parseNullPaths(output) {
 }
 function isMachineLocalIgnoredPath(filePath) {
     const normalized = filePath.replaceAll("\\", "/").replace(/^\.\//, "");
-    return normalized === "dotagents.local.yaml" || normalized === ".dotagents" || normalized.startsWith(".dotagents/");
+    return (isMachineLocalMetadataPath(normalized) ||
+        normalized === "dotagents.local.yaml" ||
+        normalized === ".dotagents" ||
+        normalized.startsWith(".dotagents/"));
 }
 async function changedLibraryPaths(root, git) {
     const [status, ignored] = await Promise.all([
@@ -111,9 +123,9 @@ async function changedLibraryPaths(root, git) {
         git.run(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"], root, { raw: true }),
     ]);
     return {
-        changed: parseChangedPaths(status),
-        // Local config and journals are intentionally excluded. Any other ignored
-        // content is surfaced so a reviewed snapshot never silently omits it.
+        // Device metadata and local configuration never form part of a portable
+        // snapshot. Everything else is surfaced so a review cannot silently omit it.
+        changed: parseChangedPaths(status).filter((filePath) => !isMachineLocalIgnoredPath(filePath)),
         ignored: parseNullPaths(ignored).filter((filePath) => !isMachineLocalIgnoredPath(filePath)),
     };
 }
@@ -121,9 +133,25 @@ function portableGitPath(filePath) {
     const normalized = normalizePortablePath(filePath);
     if (!normalized)
         return null;
-    const allowedFile = /^(?:skills\.json|skills\.lock|resources\.json|dotagents\.yaml|README(?:\.[^/]+)?|LICENSE(?:\.[^/]+)?|NOTICE(?:\.[^/]+)?|\.gitignore)$/i.test(normalized);
+    const allowedFile = /^(?:skills\.json|skills\.lock|resources\.json|dotagents\.yaml|dotagents\.scope\.json|README(?:\.[^/]+)?|LICENSE(?:\.[^/]+)?|NOTICE(?:\.[^/]+)?|\.gitignore)$/i.test(normalized);
     const allowedTree = /^(?:skills|instructions|commands|subagents|docs|assets|examples)\//.test(normalized);
     return allowedFile || allowedTree ? normalized : null;
+}
+function auditPortableScope(root) {
+    try {
+        readPortableScopeDescriptor(root);
+        return [];
+    }
+    catch {
+        return [
+            {
+                code: "invalid-scope-descriptor",
+                message: `${SCOPE_DESCRIPTOR_FILE} could not be verified safely`,
+                remediation: `Replace ${SCOPE_DESCRIPTOR_FILE} with a bounded regular JSON file using scope personal or project.`,
+                field: SCOPE_DESCRIPTOR_FILE,
+            },
+        ];
+    }
 }
 async function auditPortableResources(root, repositoryPaths) {
     const manifestPath = path.join(root, "resources.json");
@@ -291,10 +319,10 @@ function validatedRequestedRef(input) {
     }
     return requested;
 }
-async function resolveRemoteCheckout(remote, requestedInput, git) {
+async function resolveRemoteCheckout(remote, requestedInput, git, signal) {
     const requestedRef = validatedRequestedRef(requestedInput);
     if (requestedRef === "HEAD") {
-        const advertised = parseRemoteHead(await git.run(["ls-remote", "--symref", "--exit-code", "--", remote, "HEAD", "refs/heads/main", "refs/heads/master"], process.cwd(), { nonInteractive: true, raw: true }));
+        const advertised = parseRemoteHead(await git.run(["ls-remote", "--symref", "--exit-code", "--", remote, "HEAD", "refs/heads/main", "refs/heads/master"], process.cwd(), { nonInteractive: true, raw: true, signal }));
         return {
             requestedRef,
             branch: advertised.branch,
@@ -312,6 +340,7 @@ async function resolveRemoteCheckout(remote, requestedInput, git) {
     const output = await git.run(["ls-remote", "--exit-code", "--", remote, ...patterns], process.cwd(), {
         nonInteractive: true,
         raw: true,
+        signal,
     });
     const advertised = new Map(output.split(/\r?\n/).flatMap((line) => {
         const match = line.match(/^([a-f0-9]{40})\t(.+)$/i);
@@ -333,8 +362,8 @@ async function resolveRemoteCheckout(remote, requestedInput, git) {
         return { requestedRef, branch: null, commit: tagCommit };
     throw new Error(`Git ref ${requestedRef} was not advertised by the reviewed remote`);
 }
-async function reviewedRemoteCommit(remoteIdentity, commit, cwd, sourcePolicy, git) {
-    const committedAt = await git.run(["show", "-s", "--format=%cI", commit], cwd);
+async function reviewedRemoteCommit(remoteIdentity, commit, cwd, sourcePolicy, git, signal) {
+    const committedAt = await git.run(["show", "-s", "--format=%cI", commit], cwd, { signal });
     const decision = requireMinimumReleaseAge(remoteIdentity, committedAt, sourcePolicy);
     return {
         committedAt: decision.committedAt,
@@ -397,34 +426,35 @@ export async function cloneLibrary(remote, target, sourcePolicy = {}, git = new 
     const plan = await planLibraryClone(remote, target, sourcePolicy, git);
     await applyLibraryClone(plan, git);
 }
-export async function planLibraryClone(remote, target, sourcePolicy = {}, git = new NodeWorkspaceGitPort()) {
-    return planGitCheckout(remote, target, "HEAD", sourcePolicy, git);
+export async function planLibraryClone(remote, target, sourcePolicy = {}, git = new NodeWorkspaceGitPort(), options = {}) {
+    return planGitCheckout(remote, target, "HEAD", sourcePolicy, git, options);
 }
 /**
  * Resolve a branch, tag, HEAD, or immutable SHA into an exact reviewed commit.
  * The plan may contact only a source already allowed by Device policy; apply
  * fetches that exact commit and rejects any changed timestamp or policy.
  */
-export async function planGitCheckout(remote, target, requestedRef = "HEAD", sourcePolicy = {}, git = new NodeWorkspaceGitPort()) {
+export async function planGitCheckout(remote, target, requestedRef = "HEAD", sourcePolicy = {}, git = new NodeWorkspaceGitPort(), options = {}) {
     const validated = credentialFreeGitRemote(remote);
     const policy = parseSourceSecurityPolicy(sourcePolicy);
     const trust = requireTrustedSource(validated.remote, policy);
     const destination = path.resolve(target);
     if (await exists(destination))
         throw new Error("Clone destination must not already exist");
-    const advertised = await resolveRemoteCheckout(validated.remote, requestedRef, git);
+    const advertised = await resolveRemoteCheckout(validated.remote, requestedRef, git, options.signal);
     const reviewRoot = await mkdtemp(path.join(tmpdir(), "dotagents-clone-review-"));
     let age;
     try {
-        await git.run(["init", "--bare"], reviewRoot);
-        await git.run(["remote", "add", "origin", validated.remote], reviewRoot);
+        await git.run(["init", "--bare"], reviewRoot, { signal: options.signal });
+        await git.run(["remote", "add", "origin", validated.remote], reviewRoot, { signal: options.signal });
         await git.run(["fetch", "--no-tags", "--depth=1", "origin", advertised.commit], reviewRoot, {
             nonInteractive: true,
+            signal: options.signal,
         });
-        const fetched = (await git.run(["rev-parse", "FETCH_HEAD"], reviewRoot)).toLowerCase();
+        const fetched = (await git.run(["rev-parse", "FETCH_HEAD"], reviewRoot, { signal: options.signal })).toLowerCase();
         if (fetched !== advertised.commit)
             throw new Error("Git remote returned a different commit than the reviewed HEAD");
-        age = await reviewedRemoteCommit(validated.identity, fetched, reviewRoot, policy, git);
+        age = await reviewedRemoteCommit(validated.identity, fetched, reviewRoot, policy, git, options.signal);
     }
     finally {
         await rm(reviewRoot, { recursive: true, force: true });
@@ -443,7 +473,7 @@ export async function planGitCheckout(remote, target, requestedRef = "HEAD", sou
         trust,
     });
 }
-async function applyReviewedGitClone(plan, git, validateLibrary) {
+async function applyReviewedGitClone(plan, git, validateLibrary, options = {}) {
     assertPlanId(plan);
     const validated = credentialFreeGitRemote(plan.remote);
     if (validated.identity !== plan.remoteIdentity)
@@ -456,35 +486,38 @@ async function applyReviewedGitClone(plan, git, validateLibrary) {
     await mkdir(path.dirname(destination), { recursive: true });
     const staging = await mkdtemp(path.join(path.dirname(destination), `.${path.basename(destination)}.dotagents-clone-`));
     try {
-        await git.run(["init", `--initial-branch=${plan.branch ?? DEFAULT_BRANCH}`], staging);
+        await git.run(["init", `--initial-branch=${plan.branch ?? DEFAULT_BRANCH}`], staging, { signal: options.signal });
         // A portable library is byte-addressed by reviewed hashes. Git's Windows
         // line-ending conversion would silently change those bytes on checkout.
-        await git.run(["config", "core.autocrlf", "false"], staging);
-        await git.run(["remote", "add", "origin", plan.remote], staging);
+        await git.run(["config", "core.autocrlf", "false"], staging, { signal: options.signal });
+        await git.run(["remote", "add", "origin", plan.remote], staging, { signal: options.signal });
         await git.run(["fetch", "--no-tags", "--depth=1", "origin", plan.resolvedCommit], staging, {
             nonInteractive: true,
+            signal: options.signal,
         });
-        const fetched = (await git.run(["rev-parse", "FETCH_HEAD"], staging)).toLowerCase();
+        const fetched = (await git.run(["rev-parse", "FETCH_HEAD"], staging, { signal: options.signal })).toLowerCase();
         if (fetched !== plan.resolvedCommit)
             throw new Error("Git remote did not return the reviewed immutable commit");
-        const age = await reviewedRemoteCommit(plan.remoteIdentity, fetched, staging, plan.sourcePolicy, git);
+        const age = await reviewedRemoteCommit(plan.remoteIdentity, fetched, staging, plan.sourcePolicy, git, options.signal);
         if (age.committedAt !== plan.committedAt ||
             age.minimumAgeMinutes !== plan.minimumAgeMinutes ||
             age.releaseAgeExcluded !== plan.releaseAgeExcluded) {
             throw new Error("Remote commit or release-age policy changed after the preview");
         }
         if (plan.branch) {
-            await git.run(["checkout", "-B", plan.branch, plan.resolvedCommit], staging);
-            await git.run(["config", `branch.${plan.branch}.remote`, "origin"], staging);
-            await git.run(["config", `branch.${plan.branch}.merge`, `refs/heads/${plan.branch}`], staging);
+            await git.run(["checkout", "-B", plan.branch, plan.resolvedCommit], staging, { signal: options.signal });
+            await git.run(["config", `branch.${plan.branch}.remote`, "origin"], staging, { signal: options.signal });
+            await git.run(["config", `branch.${plan.branch}.merge`, `refs/heads/${plan.branch}`], staging, {
+                signal: options.signal,
+            });
         }
         else {
-            await git.run(["checkout", "--detach", plan.resolvedCommit], staging);
+            await git.run(["checkout", "--detach", plan.resolvedCommit], staging, { signal: options.signal });
         }
         if (validateLibrary)
             await ensureLibrary(staging);
-        await git.run(["config", "user.name", GIT_NAME], staging);
-        await git.run(["config", "user.email", GIT_EMAIL], staging);
+        await git.run(["config", "user.name", GIT_NAME], staging, { signal: options.signal });
+        await git.run(["config", "user.email", GIT_EMAIL], staging, { signal: options.signal });
         if (await exists(destination))
             throw new Error("Clone destination appeared after the preview");
         await rename(staging, destination);
@@ -495,11 +528,11 @@ async function applyReviewedGitClone(plan, git, validateLibrary) {
     }
 }
 /** Apply the exact reviewed commit without assuming a particular library manifest. */
-export async function applyGitClonePlan(plan, git = new NodeWorkspaceGitPort()) {
-    await applyReviewedGitClone(plan, git, false);
+export async function applyGitClonePlan(plan, git = new NodeWorkspaceGitPort(), options = {}) {
+    await applyReviewedGitClone(plan, git, false, options);
 }
-export async function applyLibraryClone(plan, git = new NodeWorkspaceGitPort()) {
-    await applyReviewedGitClone(plan, git, true);
+export async function applyLibraryClone(plan, git = new NodeWorkspaceGitPort(), options = {}) {
+    await applyReviewedGitClone(plan, git, true, options);
 }
 export async function getLibraryGitStatus(root, git = new NodeWorkspaceGitPort()) {
     const library = await ensureLibrary(root);
@@ -554,7 +587,7 @@ export async function planLibraryCommit(root, message, visibility = "private", g
         auditPortableResources(library, repositoryPaths),
         gitHead(library, git),
     ]);
-    const errors = [...auditErrors(report), ...resourceAudit.auditErrors];
+    const errors = [...auditErrors(report), ...resourceAudit.auditErrors, ...auditPortableScope(library)];
     const secretFindings = uniqueSecretFindings([...snapshot.secretFindings, ...resourceAudit.secretFindings]);
     const unsafePaths = [...new Set([...snapshot.unsafePaths, ...resourceAudit.unsafePaths, ...paths.ignored])].sort();
     const payload = {
@@ -595,11 +628,12 @@ async function reviewedWorkspaceRemote(library, sourcePolicy, git) {
         trust,
     };
 }
-export async function fetchLibrary(root, sourcePolicy = {}, git = new NodeWorkspaceGitPort()) {
+export async function fetchLibrary(root, sourcePolicy = {}, git = new NodeWorkspaceGitPort(), options = {}) {
     const library = await ensureLibrary(root);
     await reviewedWorkspaceRemote(library, sourcePolicy, git);
     await git.run(["-c", "credential.interactive=false", "fetch", "origin", "--prune", "--no-tags"], library, {
         nonInteractive: true,
+        signal: options.signal,
     });
 }
 export async function planLibraryPull(root, visibility = "private", sourcePolicy = {}, git = new NodeWorkspaceGitPort()) {
@@ -640,7 +674,11 @@ export async function planLibraryPull(root, visibility = "private", sourcePolicy
             snapshotFiles(worktree, files),
             auditPortableResources(worktree, repositoryPaths),
         ]);
-        errors = [...auditErrors(await auditLibrary({ root: worktree, visibility })), ...resourceAudit.auditErrors];
+        errors = [
+            ...auditErrors(await auditLibrary({ root: worktree, visibility })),
+            ...resourceAudit.auditErrors,
+            ...auditPortableScope(worktree),
+        ];
     }
     finally {
         try {

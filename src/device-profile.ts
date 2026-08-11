@@ -11,6 +11,7 @@ const connectionSchema = z
     id: z.string().uuid(),
     label: z.string().trim().min(1).max(80),
     provider: providerKindSchema,
+    provider_account: z.string().trim().min(1).max(200).nullable().default(null),
     remote: z.string().min(1),
     library: z.string().min(1),
     created_at: z.string().datetime(),
@@ -36,6 +37,8 @@ const storeSchema = z
 export type DeviceConnection = z.infer<typeof connectionSchema>;
 export type DeviceProfileStore = z.infer<typeof storeSchema>;
 export type DeviceProfile = DeviceConnection;
+type DeviceProfileInput = Omit<DeviceConnection, "id" | "created_at" | "last_used_at" | "provider_account"> &
+  Partial<Pick<DeviceConnection, "id" | "created_at" | "last_used_at" | "provider_account">>;
 
 export function deviceProfilePath(
   environment: NodeJS.ProcessEnv = process.env,
@@ -53,10 +56,7 @@ export function deviceProfilePath(
   return paths.join(home, ".config", "dotagents", "connections.json");
 }
 
-function cleanConnection(
-  value: Omit<DeviceConnection, "id" | "created_at" | "last_used_at"> &
-    Partial<Pick<DeviceConnection, "id" | "created_at" | "last_used_at">>,
-): DeviceConnection {
+function cleanConnection(value: DeviceProfileInput): DeviceConnection {
   const now = new Date().toISOString();
   return connectionSchema.parse({
     ...value,
@@ -88,8 +88,7 @@ async function saveStore(store: DeviceProfileStore, file = deviceProfilePath()):
 
 /** Adds or updates a local machine connection. Credentials are never stored here. */
 export async function saveDeviceProfile(
-  profile: Omit<DeviceConnection, "id" | "created_at" | "last_used_at"> &
-    Partial<Pick<DeviceConnection, "id" | "created_at" | "last_used_at">>,
+  profile: DeviceProfileInput,
   file = deviceProfilePath(),
 ): Promise<DeviceConnection> {
   const store = await loadDeviceProfileStore(file);

@@ -6,6 +6,7 @@ import { planSkillExport } from "../src/export-policy.js";
 import {
   applyLibraryUpdatePlan,
   type LibraryUpdatePlan,
+  inspectLibraryUpdateRecovery,
   libraryUpdateJournalPath,
   planLibraryUpdate,
   recoverLibraryUpdate,
@@ -163,8 +164,15 @@ describe("transactional library update", () => {
         ],
       }),
     );
+    expect(inspectLibraryUpdateRecovery(journalPath)).toEqual({
+      kind: "library-update",
+      phase: "applying",
+      itemCount: 1,
+      changedItemCount: 1,
+    });
     expect(recoverLibraryUpdate(journalPath)).toBe(true);
     expect(existsSync(operation.target)).toBe(false);
     expect(existsSync(journalPath)).toBe(false);
+    expect(inspectLibraryUpdateRecovery(journalPath)).toBeNull();
   });
 });

@@ -4,8 +4,8 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -18,7 +18,7 @@ import { planSkillExport } from "./export-policy.js";
 import { normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
 
-export const OPERATION_HISTORY_VERSION = 1 as const;
+export const OPERATION_HISTORY_VERSION = 2 as const;
 export const OPERATION_UNDO_JOURNAL_VERSION = 1 as const;
 
 const snapshotSchema = z.discriminatedUnion("kind", [
@@ -44,7 +44,12 @@ const historyChangeSchema = z
           snapshot: snapshotSchema,
         })
         .strict(),
-      z.object({ kind: z.literal("unavailable"), reason: z.enum(["sensitive-previous-content"]) }).strict(),
+      z
+        .object({
+          kind: z.literal("unavailable"),
+          reason: z.enum(["sensitive-previous-content", "unsupported-previous-target"]),
+        })
+        .strict(),
     ]),
   })
   .strict();
@@ -56,12 +61,21 @@ const operationHistoryRecordSchema = z
     operation: z.string().min(1),
     source_plan_id: z.string().regex(/^[a-f0-9]{64}$/),
     completed_at: z.string().datetime(),
+    target_root: z.string().min(1),
     changes: z.array(historyChangeSchema),
     undo_available: z.boolean(),
   })
   .strict();
 
-export type OperationHistoryRecord = z.infer<typeof operationHistoryRecordSchema>;
+const operationHistoryUndoMarkerSchema = z
+  .object({
+    schema_version: z.literal(1),
+    undone_at: z.string().datetime(),
+  })
+  .strict();
+
+type StoredOperationHistoryRecord = z.infer<typeof operationHistoryRecordSchema>;
+export type OperationHistoryRecord = StoredOperationHistoryRecord & { undone_at: string | null };
 
 export interface OperationHistoryChangeInput {
   path: string;
@@ -70,6 +84,8 @@ export interface OperationHistoryChangeInput {
   postcondition: HistoryTargetSnapshot;
   /** Transaction backup of the previous target. Absent means the target was newly created. */
   previousPath?: string;
+  /** Record a non-restorable previous target without copying or following it. */
+  previousUnavailableReason?: "unsupported-previous-target";
 }
 
 export interface WriteOperationHistoryInput {
@@ -78,6 +94,8 @@ export interface WriteOperationHistoryInput {
   changes: OperationHistoryChangeInput[];
   completedAt?: Date;
   recordId?: string;
+  /** Device-local target root when history is stored somewhere else. */
+  targetRoot?: string;
   retention?: Partial<OperationHistoryRetention>;
 }
 
@@ -110,6 +128,10 @@ export function operationHistoryRoot(root: string): string {
 export function operationHistoryRecordPath(root: string, id: string): string {
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(id)) throw new Error("Invalid operation history id");
   return path.join(operationHistoryRoot(root), id, "record.json");
+}
+
+export function operationHistoryUndoMarkerPath(root: string, id: string): string {
+  return path.join(path.dirname(operationHistoryRecordPath(root, id)), "undone.json");
 }
 
 function atomicJson(filePath: string, value: unknown): void {
@@ -200,9 +222,19 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
   const retention = retentionPolicy(input.retention);
   mkdirSync(path.join(staging, "payload"), { recursive: true });
   try {
-    const changes: OperationHistoryRecord["changes"] = [];
+    const changes: StoredOperationHistoryRecord["changes"] = [];
     for (const [index, raw] of input.changes.entries()) {
       const relativePath = portableRelativePath(raw.path);
+      if (raw.previousUnavailableReason) {
+        changes.push({
+          path: relativePath,
+          itemKind: raw.itemKind,
+          ...(raw.skill ? { skill: raw.skill } : {}),
+          postcondition: raw.postcondition,
+          inverse: { kind: "unavailable", reason: raw.previousUnavailableReason },
+        });
+        continue;
+      }
       if (!raw.previousPath) {
         changes.push({
           path: relativePath,
@@ -246,6 +278,7 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
       operation: input.operation,
       source_plan_id: input.sourcePlanId,
       completed_at: completedAt,
+      target_root: path.resolve(input.targetRoot ?? root),
       changes,
       undo_available: changes.every((change) => change.inverse.kind !== "unavailable"),
     });
@@ -259,7 +292,7 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
     mkdirSync(path.dirname(directory), { recursive: true });
     renameSync(staging, directory);
     pruneOperationHistory(root, retention, id);
-    return record;
+    return { ...record, undone_at: null };
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     rmSync(directory, { recursive: true, force: true });
@@ -268,7 +301,23 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
 }
 
 export function readOperationHistory(root: string, id: string): OperationHistoryRecord {
-  return operationHistoryRecordSchema.parse(JSON.parse(readFileSync(operationHistoryRecordPath(root, id), "utf8")));
+  const record = operationHistoryRecordSchema.parse(
+    JSON.parse(readFileSync(operationHistoryRecordPath(root, id), "utf8")),
+  );
+  const markerPath = operationHistoryUndoMarkerPath(root, id);
+  const marker = existsSync(markerPath)
+    ? operationHistoryUndoMarkerSchema.parse(JSON.parse(readFileSync(markerPath, "utf8")))
+    : null;
+  return { ...record, undone_at: marker?.undone_at ?? null };
+}
+
+function markOperationHistoryUndone(root: string, id: string): void {
+  const markerPath = operationHistoryUndoMarkerPath(root, id);
+  if (existsSync(markerPath)) return;
+  atomicJson(markerPath, {
+    schema_version: 1,
+    undone_at: new Date().toISOString(),
+  });
 }
 
 /** Remove only one exact local history record, used when its source transaction rolls back. */
@@ -312,15 +361,15 @@ export interface OperationUndoPlan {
 
 export function planOperationUndo(root: string, historyId: string): OperationUndoPlan {
   const record = readOperationHistory(root, historyId);
+  if (record.undone_at) throw new Error("This operation has already been undone");
+  const targetRoot = path.resolve(record.target_root);
   const changes: OperationUndoChange[] = record.changes.map((change) => {
-    const current = snapshotTarget(
-      path.join(path.resolve(root), ...change.path.split("/")),
-      change.itemKind,
-      change.skill,
-    );
+    const current = snapshotTarget(path.join(targetRoot, ...change.path.split("/")), change.itemKind, change.skill);
     const reason =
       change.inverse.kind === "unavailable"
-        ? "Previous content was not retained because it may contain a secret"
+        ? change.inverse.reason === "sensitive-previous-content"
+          ? "Previous content was not retained because it may contain a secret"
+          : "The previous local target could not be retained safely"
         : JSON.stringify(current) !== JSON.stringify(change.postcondition)
           ? "Target changed after the recorded operation"
           : undefined;
@@ -386,6 +435,7 @@ export function recoverOperationUndo(root: string): boolean {
     throw new Error("Unsupported operation Undo journal");
   }
   if (journal.phase === "completed") {
+    markOperationHistoryUndone(root, journal.historyId);
     for (const entry of journal.entries) {
       rmSync(entry.rollbackPath, { recursive: true, force: true });
       rmSync(entry.stagePath, { recursive: true, force: true });
@@ -399,13 +449,15 @@ export function recoverOperationUndo(root: string): boolean {
 
 export function applyOperationUndo(root: string, plan: OperationUndoPlan): { planId: string; restored: string[] } {
   const current = planOperationUndo(root, plan.historyId);
+  const record = readOperationHistory(root, plan.historyId);
   const { planId: _planId, ...payload } = plan;
   if (current.planId !== plan.planId || computePlanId(payload) !== plan.planId) {
     throw new Error("Operation Undo plan is stale or modified");
   }
   if (current.hasConflicts) throw new Error("Operation Undo plan contains conflicts");
-  const rootPath = path.resolve(root);
-  const journalPath = operationUndoJournalPath(rootPath);
+  const historyRoot = path.resolve(root);
+  const targetRoot = path.resolve(record.target_root);
+  const journalPath = operationUndoJournalPath(historyRoot);
   if (existsSync(journalPath)) throw new Error("An unfinished operation Undo requires recovery first");
   const nonce = randomUUID();
   const journal: UndoJournal = {
@@ -415,7 +467,7 @@ export function applyOperationUndo(root: string, plan: OperationUndoPlan): { pla
     historyId: plan.historyId,
     phase: "applying",
     entries: plan.changes.map((change) => {
-      const target = path.join(rootPath, ...change.path.split("/"));
+      const target = path.join(targetRoot, ...change.path.split("/"));
       return {
         ...change,
         target,
@@ -427,7 +479,7 @@ export function applyOperationUndo(root: string, plan: OperationUndoPlan): { pla
   };
   atomicJson(journalPath, journal);
   try {
-    const recordDirectory = path.dirname(operationHistoryRecordPath(rootPath, plan.historyId));
+    const recordDirectory = path.dirname(operationHistoryRecordPath(historyRoot, plan.historyId));
     for (const entry of journal.entries) {
       if (
         JSON.stringify(snapshotTarget(entry.target, entry.itemKind, entry.skill)) !==
@@ -455,11 +507,14 @@ export function applyOperationUndo(root: string, plan: OperationUndoPlan): { pla
     }
     journal.phase = "completed";
     atomicJson(journalPath, journal);
-    for (const entry of journal.entries) rmSync(entry.rollbackPath, { recursive: true, force: true });
-    rmSync(journalPath, { force: true });
-    return { planId: plan.planId, restored: plan.changes.map((change) => change.path) };
   } catch (error) {
     rollbackUndo(journalPath, journal);
     throw error;
   }
+  // Once the completed phase is durable, recovery must finish this operation;
+  // it must never roll it back merely because marker/backup cleanup is interrupted.
+  markOperationHistoryUndone(historyRoot, plan.historyId);
+  for (const entry of journal.entries) rmSync(entry.rollbackPath, { recursive: true, force: true });
+  rmSync(journalPath, { force: true });
+  return { planId: plan.planId, restored: plan.changes.map((change) => change.path) };
 }

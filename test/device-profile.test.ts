@@ -25,6 +25,7 @@ describe("device profile", () => {
         library: path.join(root, "library"),
         remote: "git@github.com:team/library.git",
         provider: "github",
+        provider_account: "alex",
         label: "Personal",
       },
       file,
@@ -51,6 +52,7 @@ describe("device profile", () => {
       id: personal.id,
       library: path.join(root, "library"),
       provider: "github",
+      provider_account: "alex",
       label: "Personal",
       remote: "https://github.com/team/library",
     });
