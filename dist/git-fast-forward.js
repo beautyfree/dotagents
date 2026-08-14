@@ -103,13 +103,13 @@ export async function inspectGitFastForwardPlan(plan, inspect, git = new NodeWor
     }
 }
 /** Applies only the exact fast-forward that was previously reviewed. */
-export async function applyGitFastForwardPlan(plan, git = new NodeWorkspaceGitPort()) {
+export async function applyGitFastForwardPlan(plan, git = new NodeWorkspaceGitPort(), options = {}) {
     assertPlanId(plan);
-    const current = await planGitFastForward(plan.workspace, plan.sourcePolicy, git);
+    const current = await planGitFastForward(plan.workspace, plan.sourcePolicy, git, options);
     if (current.planId !== plan.planId)
         throw new Error("Remote or local Git state changed after review");
     if (plan.baseHead !== plan.remoteHead)
-        await git.run(["merge", "--ff-only", plan.remoteHead], plan.workspace);
-    return git.run(["rev-parse", "HEAD"], plan.workspace);
+        await git.run(["merge", "--ff-only", plan.remoteHead], plan.workspace, options);
+    return git.run(["rev-parse", "HEAD"], plan.workspace, options);
 }
 //# sourceMappingURL=git-fast-forward.js.map

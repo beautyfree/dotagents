@@ -32,7 +32,11 @@ export interface LibraryInventory {
 export interface ScannedSkill extends OwnedSkillInventory {
     root: string;
 }
+/** A linked file may be bundled only when it resolves inside a reviewed root. */
+export interface OwnedSkillScanOptions {
+    trustedFileRoots?: readonly string[];
+}
 export declare function declaredSkillName(skillMd: string): string | null;
-export declare function scanOwnedSkill(root: string, skillPath: string, limits?: ScanLimits): Promise<DotagentsResult<ScannedSkill>>;
+export declare function scanOwnedSkill(root: string, skillPath: string, limits?: ScanLimits, options?: OwnedSkillScanOptions): Promise<DotagentsResult<ScannedSkill>>;
 export declare function scanLibrary(root: string, limits?: ScanLimits): Promise<DotagentsResult<LibraryInventory>>;
 //# sourceMappingURL=inventory.d.ts.map

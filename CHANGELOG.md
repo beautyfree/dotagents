@@ -4,6 +4,27 @@ All notable changes to `dotagents` are recorded here. The project follows semant
 
 ## Unreleased
 
+## [0.4.0] - 2026-08-14
+
+### Added
+
+- Source-aware review APIs for installed skills, including grouped linked
+  packages, update detection, and local-change reporting.
+- Transactional library updates can now carry an explicit, value-free approval
+  for an exact reviewed secret finding. A changed path, rule, line, column, or
+  skill content remains blocked and must be reviewed again.
+
+### Changed
+
+- Consolidated the public library model around canonical libraries and the
+  source-aware APIs used by desktop clients.
+
+### Removed
+
+- Removed the superseded `scope`, `resource-model`, `resource-apply`, and
+  `adopt` package exports. Consumers should migrate to canonical-library,
+  library-publish, library-removal, and source-aware review APIs.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

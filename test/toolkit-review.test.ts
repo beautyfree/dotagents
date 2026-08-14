@@ -25,6 +25,24 @@ test("toolkit review classifies portable hashes without host paths", () => {
   ]);
 });
 
+test("toolkit review keeps an explicitly excluded local skill out of the new queue until it changes", () => {
+  expect(
+    classifyToolkitChanges({
+      items: [{ id: "local-only", name: "Local only", integrity: "a".repeat(64) }],
+      library: [],
+      libraryExclusions: { "local-only": { integrity: "a".repeat(64) } },
+    }),
+  ).toEqual([{ id: "local-only", name: "Local only", kind: "kept-local" }]);
+
+  expect(
+    classifyToolkitChanges({
+      items: [{ id: "local-only", name: "Local only", integrity: "b".repeat(64) }],
+      library: [],
+      libraryExclusions: { "local-only": { integrity: "a".repeat(64) } },
+    }),
+  ).toEqual([{ id: "local-only", name: "Local only", kind: "new-local" }]);
+});
+
 test("toolkit review previews a changed portable file without following links", () => {
   const root = mkdtempSync(join(tmpdir(), "dotagents-toolkit-review-"));
   try {

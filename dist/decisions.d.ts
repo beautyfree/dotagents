@@ -8,22 +8,22 @@ export declare const importDecisionSchema: z.ZodEffects<z.ZodObject<{
     reason: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
     candidateKey: string;
-    disposition: "excluded" | "dependency" | "owned" | "vendored" | "local-only" | "suggested";
+    disposition: "excluded" | "dependency" | "vendored" | "owned" | "local-only" | "suggested";
     reason?: string | undefined;
     license?: string | undefined;
 }, {
     candidateKey: string;
-    disposition: "excluded" | "dependency" | "owned" | "vendored" | "local-only" | "suggested";
+    disposition: "excluded" | "dependency" | "vendored" | "owned" | "local-only" | "suggested";
     reason?: string | undefined;
     license?: string | undefined;
 }>, {
     candidateKey: string;
-    disposition: "excluded" | "dependency" | "owned" | "vendored" | "local-only" | "suggested";
+    disposition: "excluded" | "dependency" | "vendored" | "owned" | "local-only" | "suggested";
     reason?: string | undefined;
     license?: string | undefined;
 }, {
     candidateKey: string;
-    disposition: "excluded" | "dependency" | "owned" | "vendored" | "local-only" | "suggested";
+    disposition: "excluded" | "dependency" | "vendored" | "owned" | "local-only" | "suggested";
     reason?: string | undefined;
     license?: string | undefined;
 }>;

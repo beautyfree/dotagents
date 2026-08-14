@@ -1,4 +1,4 @@
-export type ToolkitChangeKind = "new-local" | "changed-local" | "missing-local";
+export type ToolkitChangeKind = "new-local" | "kept-local" | "changed-local" | "missing-local";
 export type ToolkitInventoryItem = {
     id: string;
     name: string;
@@ -22,6 +22,10 @@ export declare function classifyToolkitChanges(input: {
     items: readonly ToolkitInventoryItem[];
     library: readonly ToolkitLibraryItem[];
     observedIntegrity?: Readonly<Record<string, string>>;
+    /** Device-only choices to keep a currently unchanged skill outside this library. */
+    libraryExclusions?: Readonly<Record<string, {
+        integrity: string;
+    }>>;
 }): ToolkitChange[];
 export type ToolkitFileComparison = {
     local_state: "absent" | "directory" | "file" | "symlink" | "unsupported";

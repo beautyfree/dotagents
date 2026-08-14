@@ -112,3 +112,69 @@ it("upgrades an anonymous baseline when a skills.sh lock proves provenance", () 
     repository: "https://github.com/example/writing",
   });
 });
+
+it("upgrades a legacy Git record only when the discovered repository agrees", () => {
+  const file = registryFile();
+  saveLocalSkillSource(
+    "writing",
+    {
+      source: "git",
+      repository: "https://github.com/example/writing",
+      skill_path: "skills/writing",
+      ref: "main",
+      content_sha256: null,
+    },
+    file,
+  );
+  observeLocalSkills(
+    [
+      {
+        skill: "writing",
+        source: "git",
+        repository: "https://github.com/example/writing",
+        skill_path: "skills/writing",
+        ref: "main",
+      },
+    ],
+    file,
+  );
+  expect(readLocalSkillSources(file).writing).toMatchObject({ ownership: "external" });
+
+  saveLocalSkillSource(
+    "different",
+    {
+      source: "git",
+      repository: "https://github.com/example/one",
+      skill_path: "different",
+      ref: "main",
+      content_sha256: null,
+    },
+    file,
+  );
+  observeLocalSkills(
+    [
+      {
+        skill: "different",
+        source: "git",
+        repository: "https://github.com/example/two",
+        skill_path: "different",
+        ref: "main",
+      },
+    ],
+    file,
+  );
+  expect(readLocalSkillSources(file).different).toMatchObject({
+    ownership: "unknown",
+    repository: "https://github.com/example/one",
+  });
+});
+
+it("adds a discovery integrity baseline without turning an existing skill into a new item", () => {
+  const file = registryFile();
+  observeLocalSkills([{ skill: "writing" }], file);
+  expect(observeLocalSkills([{ skill: "writing", observed_integrity: "sha256-current" }], file)).toEqual({
+    initialized: false,
+    added: [],
+  });
+  expect(readLocalSkillSources(file).writing?.observed_integrity).toBe("sha256-current");
+});

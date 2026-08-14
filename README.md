@@ -132,7 +132,6 @@ command reference, see:
 
 - [Everyday workflows](docs/workflows.md)
 - [Full CLI reference](docs/README.md)
-- [How resources stay portable](docs/resource-model-v2.md)
 - [Supported Agent Skills conventions](docs/rfc-210-compatibility.md)
 
 dotagents is open source, provider-neutral, and works with any Git host that

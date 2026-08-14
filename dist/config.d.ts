@@ -92,9 +92,9 @@ export declare const portableConfigSchema: z.ZodObject<{
     defaults: z.ZodDefault<z.ZodObject<{
         include: z.ZodDefault<z.ZodEnum<["all", "owned", "selected"]>>;
     }, "strict", z.ZodTypeAny, {
-        include: "owned" | "all" | "selected";
+        include: "all" | "owned" | "selected";
     }, {
-        include?: "owned" | "all" | "selected" | undefined;
+        include?: "all" | "owned" | "selected" | undefined;
     }>>;
     skills: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodEffects<z.ZodObject<{
         include: z.ZodOptional<z.ZodBoolean>;
@@ -185,6 +185,7 @@ export declare const portableConfigSchema: z.ZodObject<{
         }>>;
     }, "strict", z.ZodTypeAny, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -192,8 +193,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -208,6 +208,7 @@ export declare const portableConfigSchema: z.ZodObject<{
         } | undefined;
     }, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -215,8 +216,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -231,6 +231,7 @@ export declare const portableConfigSchema: z.ZodObject<{
         } | undefined;
     }>, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -238,8 +239,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -254,6 +254,7 @@ export declare const portableConfigSchema: z.ZodObject<{
         } | undefined;
     }, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -261,8 +262,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -280,6 +280,7 @@ export declare const portableConfigSchema: z.ZodObject<{
     schema_version: 1;
     skills: Record<string, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -287,8 +288,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -303,13 +303,14 @@ export declare const portableConfigSchema: z.ZodObject<{
         } | undefined;
     }>;
     defaults: {
-        include: "owned" | "all" | "selected";
+        include: "all" | "owned" | "selected";
     };
     minimum_dotagents_version?: string | undefined;
 }, {
     schema_version: 1;
     skills?: Record<string, {
         include?: boolean | undefined;
+        agents?: string[] | undefined;
         snapshot?: {
             url: string;
             requested_ref: string;
@@ -317,8 +318,7 @@ export declare const portableConfigSchema: z.ZodObject<{
             skill_path: string;
             resolved_commit?: string | undefined;
         } | undefined;
-        agents?: string[] | undefined;
-        distribution?: "dependency" | "snapshot" | "vendored" | undefined;
+        distribution?: "dependency" | "vendored" | "snapshot" | undefined;
         origin?: {
             url: string;
             license: string;
@@ -334,7 +334,7 @@ export declare const portableConfigSchema: z.ZodObject<{
     }> | undefined;
     minimum_dotagents_version?: string | undefined;
     defaults?: {
-        include?: "owned" | "all" | "selected" | undefined;
+        include?: "all" | "owned" | "selected" | undefined;
     } | undefined;
 }>;
 export declare const localConfigSchema: z.ZodObject<{
@@ -351,6 +351,20 @@ export declare const localConfigSchema: z.ZodObject<{
     }>>;
     materialization: z.ZodOptional<z.ZodEnum<["auto", "native", "symlink", "junction", "copy"]>>;
     exclusions: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    /**
+     * Per-device choices for skills that intentionally stay outside one
+     * canonical library.  This file is gitignored, so a choice on one
+     * computer never hides a skill from another person's review queue.
+     */
+    library_exclusions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+        integrity: z.ZodString;
+    }, "strict", z.ZodTypeAny, {
+        integrity: string;
+    }, {
+        integrity: string;
+    }>>>;
+    /** Skills recently added to this library on this device, keyed by add time. */
+    library_recently_added: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
     environment: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
     source_security: z.ZodOptional<z.ZodObject<{
         trust: z.ZodDefault<z.ZodObject<{
@@ -398,12 +412,16 @@ export declare const localConfigSchema: z.ZodObject<{
 }, "strict", z.ZodTypeAny, {
     schema_version: 1;
     exclusions: string[];
+    library_exclusions: Record<string, {
+        integrity: string;
+    }>;
+    library_recently_added: Record<string, string>;
     environment: Record<string, string>;
     agents?: {
         selected?: string[] | undefined;
         roots?: Record<string, string> | undefined;
     } | undefined;
-    materialization?: "symlink" | "native" | "auto" | "junction" | "copy" | undefined;
+    materialization?: "auto" | "native" | "symlink" | "junction" | "copy" | undefined;
     source_security?: {
         trust: {
             mode: "deny" | "allowlist" | "allow-all";
@@ -421,8 +439,12 @@ export declare const localConfigSchema: z.ZodObject<{
         selected?: string[] | undefined;
         roots?: Record<string, string> | undefined;
     } | undefined;
-    materialization?: "symlink" | "native" | "auto" | "junction" | "copy" | undefined;
+    materialization?: "auto" | "native" | "symlink" | "junction" | "copy" | undefined;
     exclusions?: string[] | undefined;
+    library_exclusions?: Record<string, {
+        integrity: string;
+    }> | undefined;
+    library_recently_added?: Record<string, string> | undefined;
     environment?: Record<string, string> | undefined;
     source_security?: {
         trust?: {
@@ -448,6 +470,9 @@ export interface EffectiveConfig {
     agents: NonNullable<LocalConfig["agents"]>;
     materialization: NonNullable<LocalConfig["materialization"]>;
     exclusions: string[];
+    libraryExclusions: Record<string, {
+        integrity: string;
+    }>;
     environment: Record<string, string>;
     sourceSecurity: NonNullable<LocalConfig["source_security"]>;
     provenance: Record<string, ConfigProvenance>;

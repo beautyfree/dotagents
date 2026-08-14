@@ -1,10 +1,13 @@
 import { type SecretFinding } from "./audit.js";
-import { type SkillExportPlan } from "./export-policy.js";
+import { type SkillExportLimits, type SkillExportPlan } from "./export-policy.js";
+import { type OperationHistoryRetention } from "./history.js";
 export interface LibraryUpdateSkillInput {
     skill: string;
     path: string;
     sourcePath: string;
     integrity?: string;
+    /** Optional reviewed limits for large, global skill bundles. */
+    exportLimits?: SkillExportLimits;
 }
 export interface PlanLibraryUpdateInput {
     root: string;
@@ -41,6 +44,8 @@ export interface LibraryUpdateSkillOperation {
     path: string;
     target: string;
     sourcePlan: SkillExportPlan;
+    /** Retained in the reviewed plan so apply rechecks large skills consistently. */
+    exportLimits?: SkillExportLimits;
     expectedTarget: LibraryUpdateTargetSnapshot;
     reason?: string;
 }
@@ -66,9 +71,16 @@ export interface LibraryUpdatePlan {
 }
 export interface ApplyLibraryUpdateOptions {
     portableFiles: Record<string, string>;
+    /**
+     * Exact, value-free findings explicitly acknowledged in the reviewed UI.
+     * A different path, rule, line, or column is never covered by this approval.
+     */
+    acknowledgedSecretFindings?: readonly LibraryUpdateSecretFinding[];
     journalPath?: string;
+    /** Override only for a reviewed operation which explicitly needs more local undo history. */
+    historyRetention?: Partial<OperationHistoryRetention>;
     /** Human-readable origin retained in Device-local history. */
-    historyOperation?: "library-update" | "resource-adopt" | "doctor-repair" | "scope-migration";
+    historyOperation?: "library-update" | "doctor-repair";
     /** Test/UI seam. Throwing rolls back every committed operation. */
     beforeOperation?: (operation: LibraryUpdateOperation, index: number) => void;
 }

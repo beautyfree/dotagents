@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scanLibrary } from "../src/inventory.js";
+import { scanLibrary, scanOwnedSkill } from "../src/inventory.js";
 import { planSkillExport } from "../src/export-policy.js";
 
 const roots: string[] = [];
@@ -44,12 +44,21 @@ describe("library inventory", () => {
     }
   });
 
-  it("rejects links and missing SKILL.md without following them", async () => {
+  it("bundles a reviewed file link and rejects links outside the reviewed root", async () => {
     const root = makeLibrary();
     symlinkSync(join(root, "skills/writing/SKILL.md"), join(root, "skills/writing/outside.md"));
     const linked = await scanLibrary(root);
-    expect(linked.ok).toBe(false);
-    if (!linked.ok) expect(linked.issues[0]?.code).toBe("unsafe-link");
+    expect(linked.ok).toBe(true);
+
+    const outside = join(root, "outside.md");
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(root, "skills/writing/external.md"));
+    const rejected = await scanOwnedSkill(join(root, "skills"), "writing");
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) expect(rejected.issues[0]?.code).toBe("unsafe-link");
+
+    const trusted = await scanOwnedSkill(join(root, "skills"), "writing", undefined, { trustedFileRoots: [root] });
+    expect(trusted.ok).toBe(true);
 
     const missing = makeLibrary("skills/missing");
     rmSync(join(missing, "skills/missing/SKILL.md"));

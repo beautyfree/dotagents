@@ -6,7 +6,7 @@
     {
       "subpath": ".",
       "types": "./dist/index.d.ts",
-      "sha256": "ec89b793f2d5d00f7bfb14f1ee3fcc4f27427938d1cb4baaa065e3ed75991ee5"
+      "sha256": "5c98a64d3464b79cd58ea6f422a3e4f8db94e8c9a504adb9ce920ff051066c78"
     },
     {
       "subpath": "./adapters/skills-cli",
@@ -14,14 +14,9 @@
       "sha256": "83a82b3a638e2718c505e36cadc42cc1d12d722af6608a44d0691511fa6e9a08"
     },
     {
-      "subpath": "./adopt",
-      "types": "./dist/adopt.d.ts",
-      "sha256": "97665ae61afcc0d75397c945bc4d0c96c7919c417d5621224605c0c655bd8d18"
-    },
-    {
       "subpath": "./agents",
       "types": "./dist/agents.d.ts",
-      "sha256": "fa202bfd5c7b224a89e673f785020da2aa1bb25d75bc621556fb21ad677ab0c2"
+      "sha256": "d13191262bf63141ad59fe0fab7951b160c4247180837bc4d1074c9b5072fd2f"
     },
     {
       "subpath": "./audit",
@@ -46,12 +41,12 @@
     {
       "subpath": "./config",
       "types": "./dist/config.d.ts",
-      "sha256": "6939ff5ed0068a454dd26bda666cbbad6665e77fd808af88d7ec7c0cd104ff0c"
+      "sha256": "5c58423665ae7ac084dd3208d2c630e70dead57389890e42bbbdf570632281ac"
     },
     {
       "subpath": "./decisions",
       "types": "./dist/decisions.d.ts",
-      "sha256": "e4eb380b9169b223d114a416c037d29547135c77161eb3028c3848a55ff7a0e4"
+      "sha256": "df9a3a776b685da8fd82a87976d230413257fed7230e4c89ff8eb0f80e10b55c"
     },
     {
       "subpath": "./discovery",
@@ -66,22 +61,27 @@
     {
       "subpath": "./export-policy",
       "types": "./dist/export-policy.d.ts",
-      "sha256": "a3f334f67bbe726514415a5f684cacfecab8b7487811e296a3fe1bd32060fb21"
+      "sha256": "26050780e4a148efe26f8fe56b1fca4de65a019c5748d97859f43ad439485e7e"
     },
     {
       "subpath": "./git-fast-forward",
       "types": "./dist/git-fast-forward.d.ts",
-      "sha256": "5280a16d132256661763a4d3115e870e812383bea162e0c6b45a03b8ecf03eb7"
+      "sha256": "9fed10a8d862dba2525dd6ae1d4b7adb0f81bfaf0cd10d7abb5a83ab9ffd7fcf"
     },
     {
       "subpath": "./git-workspace",
       "types": "./dist/git-workspace.d.ts",
-      "sha256": "7f97d0ef9321ddffcfdae6eef74ceeae26dded3ac8ce8eaa416ebd0ad4364cd0"
+      "sha256": "e60330562997b6a5cc8713b5f19f91bf6be351848c1a20df9407852832bee78e"
+    },
+    {
+      "subpath": "./global-skill-updates",
+      "types": "./dist/global-skill-updates.d.ts",
+      "sha256": "f2b739ce09090d1ed8c3331489a245dad27009e2a538bcb940d67fcbef172555"
     },
     {
       "subpath": "./history",
       "types": "./dist/history.d.ts",
-      "sha256": "e46848e8021918462b67e9c9742e91201e3fe47cd885ff2d940a311a5c3084e5"
+      "sha256": "4f744ee9faab05f4aa49253abbf0d2272e43611e23019e16da5c769cd70e24b1"
     },
     {
       "subpath": "./import",
@@ -106,7 +106,7 @@
     {
       "subpath": "./inventory",
       "types": "./dist/inventory.d.ts",
-      "sha256": "85a2e3ea028997bf048759f67720810822ea43caa2134b84e8bd3f5d3831be9b"
+      "sha256": "21d2fe4a2342c57602cb629f5eeb96d88ee2200b48bd6aa85f91b61cc762f392"
     },
     {
       "subpath": "./library",
@@ -116,12 +116,22 @@
     {
       "subpath": "./library-publish",
       "types": "./dist/library-publish.d.ts",
-      "sha256": "31d49bf0a32735a0f9ff2abea449b007db56a18baf8b2e883b5132c155ab088d"
+      "sha256": "429bc4d599a01c221471d30d558ffb0e2ddb13248d6870cc760887d8947912e9"
+    },
+    {
+      "subpath": "./library-removal",
+      "types": "./dist/library-removal.d.ts",
+      "sha256": "32e13a3afa0d480d85a4ce054de3d49c84a269379f1dafc641fe015952de3cc3"
     },
     {
       "subpath": "./library-update",
       "types": "./dist/library-update.d.ts",
-      "sha256": "fece8a761cb0dd45d47d79d6cedaf0539b2e3416fdf0a04aee148bf9b2db88ea"
+      "sha256": "b059e983606baf5596d57da65c909ddd61fca732eb1381d347e7f694828047c2"
+    },
+    {
+      "subpath": "./linked-skill-package-updates",
+      "types": "./dist/linked-skill-package-updates.d.ts",
+      "sha256": "164c84f74dcd3efaaf15a103790d98f8d6803bab2d8be2958bbf563dc67c928a"
     },
     {
       "subpath": "./machine",
@@ -154,29 +164,24 @@
       "sha256": "56d3537a963e713dd62c965ec0590b9e7bc58ee1ed76607ad6677c1dfa3be681"
     },
     {
-      "subpath": "./resource-apply",
-      "types": "./dist/resource-apply.d.ts",
-      "sha256": "81aec4978a2c92d5e55e340601cef3991bfea60546396e79fdc6f34b1916df6b"
-    },
-    {
-      "subpath": "./resource-model",
-      "types": "./dist/resource-model.d.ts",
-      "sha256": "a6504560724b9c442bdd608efadfe56243006f0c01bc79a143f44c1538a4eb08"
-    },
-    {
       "subpath": "./schema",
       "types": "./dist/schema.d.ts",
       "sha256": "a6590f49be857684fa099042d3519888ab41355977bb66957447f9a5250ecab3"
     },
     {
-      "subpath": "./scope",
-      "types": "./dist/scope.d.ts",
-      "sha256": "278c84d95d807c1e913c09e35cd7a8b2841b067fbb784a72388c61acaabcdd1d"
-    },
-    {
       "subpath": "./selection",
       "types": "./dist/selection.d.ts",
       "sha256": "40cc0e565f7651f8d4c301dc74a5012d3e26fac038d5d7b1a197da4bf35a3776"
+    },
+    {
+      "subpath": "./skill-evolution",
+      "types": "./dist/skill-evolution.d.ts",
+      "sha256": "aa9664e30e40aa26340b159023a1c615c65bef922a0ce4deb3c2d4cda1633252"
+    },
+    {
+      "subpath": "./skill-fork",
+      "types": "./dist/skill-fork.d.ts",
+      "sha256": "ab95dba5915b4e9fbe46b5b9392926f34cfbd2ef339f38b0eb62f96104772ac4"
     },
     {
       "subpath": "./source-migration",
@@ -191,7 +196,7 @@
     {
       "subpath": "./source-registry",
       "types": "./dist/source-registry.d.ts",
-      "sha256": "97b5b5cd93d2a8bc1bc63e71b9c0a245e635b3287d327b8996b80c3ac02a41d1"
+      "sha256": "4bb3c92f0a2ad698998caa7f511efccd02652bf70ce6debdc2cbdc2779051f92"
     },
     {
       "subpath": "./source-session",
@@ -211,7 +216,7 @@
     {
       "subpath": "./toolkit-review",
       "types": "./dist/toolkit-review.d.ts",
-      "sha256": "4006c25037045e34dd7720636229b1da3bed8bf0f0fd0a31db178cbabfce694b"
+      "sha256": "2be137dcc54cb881eeb41b87a831636fb06ab6c4c848cc1b26722a8d14a6bb55"
     },
     {
       "subpath": "./well-known",

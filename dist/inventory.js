@@ -1,20 +1,43 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { computeSkillIntegrity } from "./integrity.js";
 import { loadLibrary } from "./library.js";
 import { isMachineLocalMetadataPath } from "./paths.js";
 import { parse } from "yaml";
 export const DEFAULT_SCAN_LIMITS = {
-    maxFilesPerSkill: 1_000,
-    maxFileBytes: 10 * 1024 * 1024,
-    maxSkillBytes: 50 * 1024 * 1024,
+    // Git-backed skill packages may include docs and checked-in tooling next to
+    // their SKILL.md. This remains a bounded read-only inventory pass; portable
+    // exports retain their stricter, explicit policy.
+    maxFilesPerSkill: 2_000,
+    // Discovery also fingerprints Git-backed packages before deciding whether
+    // they stay linked. A few legitimate packages ship a single checked-in
+    // helper binary, so the read-only scan limit is deliberately higher than a
+    // later portable-copy policy.
+    maxFileBytes: 64 * 1024 * 1024,
+    maxSkillBytes: 1024 * 1024 * 1024,
 };
 function computePortableExportHash(files) {
     const entries = files
         .filter((file) => !isMachineLocalMetadataPath(file.path))
         .map((file) => `${file.path}\0${createHash("sha256").update(file.content).digest("hex")}`);
     return createHash("sha256").update(entries.join("\n")).digest("hex");
+}
+async function isWithinTrustedRoot(target, skillRoot, trustedRoots) {
+    const roots = await Promise.all([skillRoot, ...trustedRoots].map(async (root) => {
+        try {
+            return await realpath(root);
+        }
+        catch {
+            return null;
+        }
+    }));
+    return roots.some((root) => {
+        if (!root)
+            return false;
+        const relative = path.relative(root, target);
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+    });
 }
 export function declaredSkillName(skillMd) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(skillMd.replace(/^\uFEFF/, ""));
@@ -32,7 +55,7 @@ export function declaredSkillName(skillMd) {
 function issue(code, message, remediation, filePath) {
     return { code, message, remediation, path: filePath };
 }
-async function collectSkillFiles(skillRoot, limits) {
+async function collectSkillFiles(skillRoot, limits, options) {
     const files = [];
     let bytes = 0;
     const walk = async (directory) => {
@@ -53,10 +76,30 @@ async function collectSkillFiles(skillRoot, limits) {
             if (relative === ".dotagents-managed.json")
                 continue;
             if (entry.isSymbolicLink()) {
-                return issue("unsafe-link", `Skill contains a symbolic link at ${relative}.`, "Replace it with a regular file inside the skill or keep the skill as an external dependency.", absolute);
+                try {
+                    const target = await realpath(absolute);
+                    const targetMetadata = await lstat(target);
+                    const allowed = targetMetadata.isFile() && (await isWithinTrustedRoot(target, skillRoot, options.trustedFileRoots ?? []));
+                    if (!allowed) {
+                        return issue("unsafe-link", `Skill contains a symbolic link at ${relative}.`, "Only links to regular files inside a reviewed root can be saved as portable copies.", absolute);
+                    }
+                    if (files.length >= limits.maxFilesPerSkill ||
+                        targetMetadata.size > limits.maxFileBytes ||
+                        bytes + targetMetadata.size > limits.maxSkillBytes) {
+                        return issue("limit-exceeded", `Linked file ${relative} exceeds this library's portable file limits.`, "Reduce the linked file size or keep the skill as an external dependency.", absolute);
+                    }
+                    bytes += targetMetadata.size;
+                    files.push({ path: relative, content: await readFile(target) });
+                    continue;
+                }
+                catch {
+                    return issue("unsafe-link", `Skill contains an unreadable symbolic link at ${relative}.`, "Repair the link or keep the skill as an external dependency.", absolute);
+                }
             }
             if (entry.isDirectory()) {
-                if (entry.name === ".git" || entry.name === "node_modules")
+                // A nested .agents directory describes local agent wiring. It is not
+                // part of a portable skill bundle and commonly contains package links.
+                if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".agents")
                     continue;
                 const nested = await walk(absolute);
                 if (nested)
@@ -83,7 +126,7 @@ async function collectSkillFiles(skillRoot, limits) {
     const unsafe = await walk(skillRoot);
     return unsafe ? { ok: false, issues: [unsafe] } : { ok: true, value: { files, bytes }, issues: [] };
 }
-export async function scanOwnedSkill(root, skillPath, limits = DEFAULT_SCAN_LIMITS) {
+export async function scanOwnedSkill(root, skillPath, limits = DEFAULT_SCAN_LIMITS, options = {}) {
     const skillRoot = skillPath === "." ? root : path.join(root, ...skillPath.split("/"));
     let metadata;
     try {
@@ -151,7 +194,7 @@ export async function scanOwnedSkill(root, skillPath, limits = DEFAULT_SCAN_LIMI
             ],
         };
     }
-    const collected = await collectSkillFiles(skillRoot, limits);
+    const collected = await collectSkillFiles(skillRoot, limits, options);
     if (!collected.ok)
         return collected;
     return {

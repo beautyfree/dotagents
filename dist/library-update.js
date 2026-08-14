@@ -5,7 +5,14 @@ import { scanTextForSecrets } from "./audit.js";
 import { planSkillExport } from "./export-policy.js";
 import { normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
-import { removeOperationHistory, writeOperationHistory } from "./history.js";
+import { removeOperationHistory, writeOperationHistory, } from "./history.js";
+function isAcknowledgedSecretFinding(finding, acknowledgements) {
+    return acknowledgements.some((acknowledgement) => acknowledgement.item === finding.item &&
+        acknowledgement.relativePath === finding.relativePath &&
+        acknowledgement.rule === finding.rule &&
+        acknowledgement.line === finding.line &&
+        acknowledgement.column === finding.column);
+}
 export const LIBRARY_UPDATE_JOURNAL_VERSION = 1;
 function sha256(value) {
     return createHash("sha256").update(value).digest("hex");
@@ -50,7 +57,7 @@ function snapshotFileTarget(target) {
         return { kind: "unsupported", description: "The portable file target is a directory" };
     return { kind: "unsupported", description: "The portable file target is not a regular file" };
 }
-function snapshotSkillTarget(skill, target) {
+function snapshotSkillTarget(skill, target, exportLimits) {
     if (!existsSync(target))
         return { kind: "absent" };
     const metadata = lstatSync(target);
@@ -61,7 +68,7 @@ function snapshotSkillTarget(skill, target) {
     if (!metadata.isDirectory())
         return { kind: "unsupported", description: "The skill target is not a directory" };
     try {
-        return { kind: "directory", integrity: planSkillExport(skill, target).sha256 };
+        return { kind: "directory", integrity: planSkillExport(skill, target, exportLimits).sha256 };
     }
     catch (error) {
         return {
@@ -113,7 +120,7 @@ export function planLibraryUpdate(input) {
     }
     for (const inputSkill of [...input.skills].sort((left, right) => left.skill.localeCompare(right.skill, "en"))) {
         const skillPath = portablePath(inputSkill.path);
-        const sourcePlan = planSkillExport(inputSkill.skill, inputSkill.sourcePath);
+        const sourcePlan = planSkillExport(inputSkill.skill, inputSkill.sourcePath, inputSkill.exportLimits);
         if (inputSkill.integrity && inputSkill.integrity !== sourcePlan.sha256) {
             throw new Error(`Library update source integrity mismatch: ${inputSkill.skill}`);
         }
@@ -123,7 +130,7 @@ export function planLibraryUpdate(input) {
             relativePath: `${skillPath}/${finding.relativePath}`,
         })));
         const target = path.join(root, ...skillPath.split("/"));
-        const expectedTarget = snapshotSkillTarget(inputSkill.skill, target);
+        const expectedTarget = snapshotSkillTarget(inputSkill.skill, target, inputSkill.exportLimits);
         const reason = operationConflict(expectedTarget, "skill");
         operations.push({
             kind: "skill",
@@ -131,6 +138,7 @@ export function planLibraryUpdate(input) {
             path: skillPath,
             target,
             sourcePlan,
+            ...(inputSkill.exportLimits ? { exportLimits: inputSkill.exportLimits } : {}),
             expectedTarget,
             ...(reason ? { reason } : {}),
         });
@@ -166,14 +174,14 @@ function writeJournal(filePath, journal) {
 function currentSnapshot(operation) {
     return operation.kind === "file"
         ? snapshotFileTarget(operation.target)
-        : snapshotSkillTarget(operation.skill, operation.target);
+        : snapshotSkillTarget(operation.skill, operation.target, operation.exportLimits);
 }
 function assertTargetUnchanged(operation) {
     if (JSON.stringify(currentSnapshot(operation)) !== JSON.stringify(operation.expectedTarget)) {
         throw new Error(`Library update target changed after review: ${operation.path}`);
     }
 }
-function portableFileContents(plan, provided) {
+function portableFileContents(plan, provided, acknowledgements) {
     const expected = plan.operations.filter((operation) => operation.kind === "file");
     const actual = new Map();
     for (const [file, content] of Object.entries(provided))
@@ -188,24 +196,30 @@ function portableFileContents(plan, provided) {
             Buffer.byteLength(content) !== operation.size) {
             throw new Error(`Portable file changed after review: ${operation.path}`);
         }
-        if (scanTextForSecrets(content).length > 0) {
+        const unacknowledgedFindings = scanTextForSecrets(content).filter((finding) => !isAcknowledgedSecretFinding({ ...finding, item: operation.path, relativePath: operation.path }, acknowledgements));
+        if (unacknowledgedFindings.length > 0) {
             throw new Error(`Portable file now contains possible secrets: ${operation.path}`);
         }
     }
     return actual;
 }
-function assertSkillSource(operation) {
-    const current = planSkillExport(operation.skill, operation.sourcePlan.sourcePath);
+function assertSkillSource(operation, acknowledgements) {
+    const current = planSkillExport(operation.skill, operation.sourcePlan.sourcePath, operation.exportLimits);
     if (current.sha256 !== operation.sourcePlan.sha256) {
         throw new Error(`Library update source changed after review: ${operation.skill}`);
     }
-    if (current.secretFindings.length > 0) {
+    const unacknowledgedFindings = current.secretFindings.filter((finding) => !isAcknowledgedSecretFinding({
+        ...finding,
+        item: operation.skill,
+        relativePath: `${operation.path}/${finding.relativePath}`,
+    }, acknowledgements));
+    if (unacknowledgedFindings.length > 0) {
         throw new Error(`Library update source now contains possible secrets: ${operation.skill}`);
     }
     return current;
 }
-function stageSkill(operation, destination) {
-    const sourcePlan = assertSkillSource(operation);
+function stageSkill(operation, destination, acknowledgements) {
+    const sourcePlan = assertSkillSource(operation, acknowledgements);
     mkdirSync(destination, { recursive: false });
     for (const file of sourcePlan.files) {
         const content = readFileSync(path.join(sourcePlan.sourcePath, ...file.relativePath.split("/")));
@@ -216,15 +230,15 @@ function stageSkill(operation, destination) {
         mkdirSync(path.dirname(target), { recursive: true });
         writeFileSync(target, content, { flag: "wx" });
     }
-    if (planSkillExport(operation.skill, destination).sha256 !== sourcePlan.sha256) {
+    if (planSkillExport(operation.skill, destination, operation.exportLimits).sha256 !== sourcePlan.sha256) {
         throw new Error(`Staged library update changed: ${operation.skill}`);
     }
 }
-function stageOperation(operation, stagePath, files) {
+function stageOperation(operation, stagePath, files, acknowledgements) {
     rmSync(stagePath, { recursive: true, force: true });
     mkdirSync(path.dirname(stagePath), { recursive: true });
     if (operation.kind === "skill") {
-        stageSkill(operation, stagePath);
+        stageSkill(operation, stagePath, acknowledgements);
         return;
     }
     const content = files.get(operation.path);
@@ -327,10 +341,12 @@ export function applyLibraryUpdatePlan(plan, options) {
         throw new Error("Library update plan is stale or modified");
     if (plan.hasConflicts)
         throw new Error("Library update plan contains target conflicts");
-    if (plan.secretFindings.length > 0) {
-        throw new Error(`Library update is blocked by ${plan.secretFindings.length} possible secret finding(s)`);
+    const unacknowledgedSecretFindings = plan.secretFindings.filter((finding) => !isAcknowledgedSecretFinding(finding, options.acknowledgedSecretFindings ?? []));
+    if (unacknowledgedSecretFindings.length > 0) {
+        throw new Error(`Library update is blocked by ${unacknowledgedSecretFindings.length} possible secret finding(s)`);
     }
-    const files = portableFileContents(plan, options.portableFiles);
+    const acknowledgements = options.acknowledgedSecretFindings ?? [];
+    const files = portableFileContents(plan, options.portableFiles, acknowledgements);
     const journalPath = options.journalPath ?? libraryUpdateJournalPath(plan.root);
     if (existsSync(journalPath))
         throw new Error("An unfinished library update requires recovery first");
@@ -338,7 +354,7 @@ export function applyLibraryUpdatePlan(plan, options) {
     for (const operation of plan.operations) {
         assertTargetUnchanged(operation);
         if (operation.kind === "skill")
-            assertSkillSource(operation);
+            assertSkillSource(operation, acknowledgements);
     }
     const nonce = randomUUID();
     const journal = {
@@ -358,7 +374,7 @@ export function applyLibraryUpdatePlan(plan, options) {
     writeJournal(journalPath, journal);
     try {
         for (const entry of journal.entries) {
-            stageOperation(entry.operation, entry.stagePath, files);
+            stageOperation(entry.operation, entry.stagePath, files, acknowledgements);
             entry.status = "staged";
             writeJournal(journalPath, journal);
         }
@@ -387,10 +403,14 @@ export function applyLibraryUpdatePlan(plan, options) {
             operation: options.historyOperation ?? "library-update",
             sourcePlanId: planId,
             recordId: journal.historyId,
+            ...(options.historyRetention ? { retention: options.historyRetention } : {}),
             changes: journal.entries.map((entry) => ({
                 path: entry.operation.path,
                 itemKind: entry.operation.kind,
                 ...(entry.operation.kind === "skill" ? { skill: entry.operation.skill } : {}),
+                ...(entry.operation.kind === "skill" && entry.operation.exportLimits
+                    ? { exportLimits: entry.operation.exportLimits }
+                    : {}),
                 postcondition: (entry.operation.kind === "file"
                     ? { kind: "file", sha256: entry.operation.sha256 }
                     : { kind: "directory", integrity: entry.operation.sourcePlan.sha256 }),

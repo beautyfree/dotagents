@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planSkillExport } from "../src/export-policy.js";
+import { DEFAULT_SKILL_EXPORT_LIMITS, planSkillExport } from "../src/export-policy.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -40,12 +40,24 @@ describe("owned skill export policy", () => {
     expect(JSON.stringify(first)).not.toContain("ghp_");
   });
 
-  it("rejects links, unsafe names, and content limits", () => {
+  it("materializes reviewed file links and rejects links outside reviewed roots", () => {
     const root = skillRoot();
     symlinkSync(join(root, "SKILL.md"), join(root, "linked.md"));
-    expect(() => planSkillExport("writing", root)).toThrow("rejects symlink");
+    expect(planSkillExport("writing", root).files.map((file) => file.relativePath)).toContain("linked.md");
+    const outsideRoot = mkdtempSync(join(tmpdir(), "dotagents-export-outside-"));
+    roots.push(outsideRoot);
+    const outside = join(outsideRoot, "outside.md");
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(root, "outside.md"));
+    expect(() => planSkillExport("writing", root)).toThrow("outside a reviewed root");
+    expect(
+      planSkillExport("writing", root, { ...DEFAULT_SKILL_EXPORT_LIMITS, trustedFileRoots: [outsideRoot] }).files.map(
+        (file) => file.relativePath,
+      ),
+    ).toContain("outside.md");
     expect(() => planSkillExport("Not Portable", root)).toThrow("lowercase kebab-case");
     rmSync(join(root, "linked.md"));
+    rmSync(join(root, "outside.md"));
     expect(() => planSkillExport("writing", root, { maxFiles: 1, maxBytes: 1_000, excludedDirectories: [] })).toThrow(
       "exceeds 1 files",
     );

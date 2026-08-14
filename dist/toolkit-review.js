@@ -12,8 +12,11 @@ export function classifyToolkitChanges(input) {
     const changes = new Map();
     for (const item of input.items) {
         const saved = libraryById.get(item.id);
-        if (!saved)
-            changes.set(`new-local:${item.id}`, { id: item.id, name: item.name, kind: "new-local" });
+        if (!saved) {
+            const exclusion = input.libraryExclusions?.[item.id];
+            const kind = exclusion?.integrity === item.integrity ? "kept-local" : "new-local";
+            changes.set(`${kind}:${item.id}`, { id: item.id, name: item.name, kind });
+        }
         else if (saved.integrity && saved.integrity !== item.integrity)
             changes.set(`changed-local:${item.id}`, { id: item.id, name: item.name, kind: "changed-local" });
     }
@@ -21,10 +24,18 @@ export function classifyToolkitChanges(input) {
         if (!localIds.has(id))
             changes.set(`missing-local:${id}`, { id, name: id, kind: "missing-local" });
     }
-    const rank = { "changed-local": 0, "new-local": 1, "missing-local": 2 };
+    const rank = {
+        "changed-local": 0,
+        "new-local": 1,
+        "missing-local": 2,
+        "kept-local": 3,
+    };
     return [...changes.values()].sort((left, right) => rank[left.kind] - rank[right.kind] || left.name.localeCompare(right.name, "en"));
 }
-const TEXT_PREVIEW_BYTES = 256 * 1024;
+// Diffs are rendered through a virtualized viewport in Skiller, so the limit
+// protects IPC and memory rather than the number of DOM rows. This comfortably
+// covers large real-world SKILL.md files such as generated tool guides.
+const TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 const IMAGE_PREVIEW_BYTES = 4 * 1024 * 1024;
 const SKILL_MD_PREVIEW_BYTES = 24_000;
 const IMAGE_MIME_TYPES = {
@@ -85,8 +96,6 @@ function skillMdPreview(root) {
 }
 function compactDiff(saved, local) {
     const before = saved?.split("\n") ?? [], after = local?.split("\n") ?? [];
-    if (before.length > 900 || after.length > 900)
-        return null;
     let prefix = 0, suffix = 0;
     while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix])
         prefix += 1;

@@ -8,12 +8,14 @@ export interface SkillExportLimits {
   maxFiles: number;
   maxBytes: number;
   excludedDirectories: readonly string[];
+  /** Explicit discovery roots whose regular file links may be materialized. */
+  trustedFileRoots?: readonly string[];
 }
 
 export const DEFAULT_SKILL_EXPORT_LIMITS: SkillExportLimits = {
   maxFiles: 1_000,
   maxBytes: 50 * 1024 * 1024,
-  excludedDirectories: [".git", "node_modules"],
+  excludedDirectories: [".git", "node_modules", ".agents"],
 };
 
 export interface SkillExportFile {
@@ -40,9 +42,15 @@ function assertSkillName(value: string): void {
     throw new Error(`Skill name must be a lowercase kebab-case identifier: ${value}`);
 }
 
+function isWithinRoot(target: string, root: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 /**
  * Builds a deterministic, value-free, read-only export plan for an owned skill.
- * Symlinks and unsupported file types are rejected instead of being followed.
+ * Directory links and links outside reviewed roots are rejected. Regular file
+ * links inside an explicit reviewed root are materialized as portable content.
  */
 export function planSkillExport(
   skill: string,
@@ -58,6 +66,13 @@ export function planSkillExport(
   if (!lstatSync(root).isDirectory()) throw new Error(`Skill export source is not a directory: ${sourcePath}`);
 
   const excludedDirectories = new Set(limits.excludedDirectories);
+  const trustedRoots = [root, ...(limits.trustedFileRoots ?? [])].flatMap((candidate) => {
+    try {
+      return [realpathSync(candidate)];
+    } catch {
+      return [];
+    }
+  });
   const files: SkillExportFile[] = [];
   const excludedPaths: string[] = [];
   const secretFindings: SkillExportFinding[] = [];
@@ -74,7 +89,29 @@ export function planSkillExport(
         continue;
       }
       const entry = lstatSync(absolutePath);
-      if (entry.isSymbolicLink()) throw new Error(`Skill export rejects symlink: ${relativePath}`);
+      if (entry.isSymbolicLink()) {
+        let target: string;
+        let targetEntry: ReturnType<typeof lstatSync>;
+        try {
+          target = realpathSync(absolutePath);
+          targetEntry = lstatSync(target);
+        } catch {
+          throw new Error(`Skill export rejects unreadable symlink: ${relativePath}`);
+        }
+        if (!targetEntry.isFile() || !trustedRoots.some((trustedRoot) => isWithinRoot(target, trustedRoot)))
+          throw new Error(`Skill export rejects symlink outside a reviewed root: ${relativePath}`);
+        if (files.length >= limits.maxFiles) throw new Error(`Skill export exceeds ${limits.maxFiles} files`);
+        const content = readFileSync(target);
+        totalBytes += content.length;
+        if (totalBytes > limits.maxBytes) throw new Error(`Skill export exceeds ${limits.maxBytes} bytes`);
+        if (!content.subarray(0, Math.min(content.length, 8_192)).includes(0)) {
+          for (const finding of scanTextForSecrets(content.toString("utf8"))) {
+            secretFindings.push({ ...finding, relativePath });
+          }
+        }
+        files.push({ relativePath, size: content.length, sha256: createHash("sha256").update(content).digest("hex") });
+        continue;
+      }
       if (entry.isDirectory()) {
         if (excludedDirectories.has(name)) {
           excludedPaths.push(relativePath);

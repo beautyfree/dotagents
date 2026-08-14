@@ -1,11 +1,3 @@
-export function agentResourceCapabilities(descriptor) {
-    return (descriptor.resources ?? {
-        skill: { support: "native", adapter: "legacy-skill-delivery" },
-        instruction: { support: "unsupported" },
-        command: { support: "unsupported" },
-        subagent: { support: "unsupported" },
-    });
-}
 export function validateAgentDescriptor(descriptor) {
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(descriptor.slug))
         throw new Error(`Invalid agent slug: ${descriptor.slug}`);
@@ -15,17 +7,6 @@ export function validateAgentDescriptor(descriptor) {
         throw new Error(`Agent ${descriptor.slug} has no supported platform`);
     if (descriptor.skills.length === 0)
         throw new Error(`Agent ${descriptor.slug} has no skill delivery capability`);
-    for (const kind of ["skill", "instruction", "command", "subagent"]) {
-        const capability = agentResourceCapabilities(descriptor)[kind];
-        if (!capability)
-            throw new Error(`Agent ${descriptor.slug} has no ${kind} resource capability declaration`);
-        if (capability.support === "lossy" && (!capability.adapter?.trim() || !capability.loss?.trim())) {
-            throw new Error(`Agent ${descriptor.slug} has an incomplete lossy ${kind} adapter declaration`);
-        }
-        if (capability.support === "unsupported" && (capability.adapter || capability.loss)) {
-            throw new Error(`Agent ${descriptor.slug} cannot attach an adapter to unsupported ${kind} resources`);
-        }
-    }
     for (const rule of descriptor.detection) {
         const value = rule.kind === "command" ? rule.command : rule.path;
         if (!value.trim() || /[\r\n\0]/.test(value))

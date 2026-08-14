@@ -12,16 +12,23 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { type SecretFinding, scanTextForSecrets } from "./audit.js";
-import { planSkillExport, type SkillExportPlan } from "./export-policy.js";
+import { planSkillExport, type SkillExportLimits, type SkillExportPlan } from "./export-policy.js";
 import { normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
-import { removeOperationHistory, writeOperationHistory, type HistoryTargetSnapshot } from "./history.js";
+import {
+  removeOperationHistory,
+  writeOperationHistory,
+  type HistoryTargetSnapshot,
+  type OperationHistoryRetention,
+} from "./history.js";
 
 export interface LibraryUpdateSkillInput {
   skill: string;
   path: string;
   sourcePath: string;
   integrity?: string;
+  /** Optional reviewed limits for large, global skill bundles. */
+  exportLimits?: SkillExportLimits;
 }
 
 export interface PlanLibraryUpdateInput {
@@ -53,6 +60,8 @@ export interface LibraryUpdateSkillOperation {
   path: string;
   target: string;
   sourcePlan: SkillExportPlan;
+  /** Retained in the reviewed plan so apply rechecks large skills consistently. */
+  exportLimits?: SkillExportLimits;
   expectedTarget: LibraryUpdateTargetSnapshot;
   reason?: string;
 }
@@ -73,9 +82,16 @@ export interface LibraryUpdatePlan {
 
 export interface ApplyLibraryUpdateOptions {
   portableFiles: Record<string, string>;
+  /**
+   * Exact, value-free findings explicitly acknowledged in the reviewed UI.
+   * A different path, rule, line, or column is never covered by this approval.
+   */
+  acknowledgedSecretFindings?: readonly LibraryUpdateSecretFinding[];
   journalPath?: string;
+  /** Override only for a reviewed operation which explicitly needs more local undo history. */
+  historyRetention?: Partial<OperationHistoryRetention>;
   /** Human-readable origin retained in Device-local history. */
-  historyOperation?: "library-update" | "resource-adopt" | "doctor-repair" | "scope-migration";
+  historyOperation?: "library-update" | "doctor-repair";
   /** Test/UI seam. Throwing rolls back every committed operation. */
   beforeOperation?: (operation: LibraryUpdateOperation, index: number) => void;
 }
@@ -84,6 +100,20 @@ export interface ApplyLibraryUpdateResult {
   planId: string;
   updated: string[];
   historyId: string;
+}
+
+function isAcknowledgedSecretFinding(
+  finding: LibraryUpdateSecretFinding,
+  acknowledgements: readonly LibraryUpdateSecretFinding[],
+): boolean {
+  return acknowledgements.some(
+    (acknowledgement) =>
+      acknowledgement.item === finding.item &&
+      acknowledgement.relativePath === finding.relativePath &&
+      acknowledgement.rule === finding.rule &&
+      acknowledgement.line === finding.line &&
+      acknowledgement.column === finding.column,
+  );
 }
 
 export const LIBRARY_UPDATE_JOURNAL_VERSION = 1 as const;
@@ -154,14 +184,18 @@ function snapshotFileTarget(target: string): LibraryUpdateTargetSnapshot {
   return { kind: "unsupported", description: "The portable file target is not a regular file" };
 }
 
-function snapshotSkillTarget(skill: string, target: string): LibraryUpdateTargetSnapshot {
+function snapshotSkillTarget(
+  skill: string,
+  target: string,
+  exportLimits?: SkillExportLimits,
+): LibraryUpdateTargetSnapshot {
   if (!existsSync(target)) return { kind: "absent" };
   const metadata = lstatSync(target);
   if (metadata.isSymbolicLink()) return { kind: "symlink", linkTarget: readlinkSync(target) };
   if (metadata.isFile()) return { kind: "unsupported", description: "The skill target is a regular file" };
   if (!metadata.isDirectory()) return { kind: "unsupported", description: "The skill target is not a directory" };
   try {
-    return { kind: "directory", integrity: planSkillExport(skill, target).sha256 };
+    return { kind: "directory", integrity: planSkillExport(skill, target, exportLimits).sha256 };
   } catch (error) {
     return {
       kind: "unsupported",
@@ -213,7 +247,7 @@ export function planLibraryUpdate(input: PlanLibraryUpdateInput): LibraryUpdateP
   }
   for (const inputSkill of [...input.skills].sort((left, right) => left.skill.localeCompare(right.skill, "en"))) {
     const skillPath = portablePath(inputSkill.path);
-    const sourcePlan = planSkillExport(inputSkill.skill, inputSkill.sourcePath);
+    const sourcePlan = planSkillExport(inputSkill.skill, inputSkill.sourcePath, inputSkill.exportLimits);
     if (inputSkill.integrity && inputSkill.integrity !== sourcePlan.sha256) {
       throw new Error(`Library update source integrity mismatch: ${inputSkill.skill}`);
     }
@@ -225,7 +259,7 @@ export function planLibraryUpdate(input: PlanLibraryUpdateInput): LibraryUpdateP
       })),
     );
     const target = path.join(root, ...skillPath.split("/"));
-    const expectedTarget = snapshotSkillTarget(inputSkill.skill, target);
+    const expectedTarget = snapshotSkillTarget(inputSkill.skill, target, inputSkill.exportLimits);
     const reason = operationConflict(expectedTarget, "skill");
     operations.push({
       kind: "skill",
@@ -233,6 +267,7 @@ export function planLibraryUpdate(input: PlanLibraryUpdateInput): LibraryUpdateP
       path: skillPath,
       target,
       sourcePlan,
+      ...(inputSkill.exportLimits ? { exportLimits: inputSkill.exportLimits } : {}),
       expectedTarget,
       ...(reason ? { reason } : {}),
     });
@@ -272,7 +307,7 @@ function writeJournal(filePath: string, journal: LibraryUpdateJournal): void {
 function currentSnapshot(operation: LibraryUpdateOperation): LibraryUpdateTargetSnapshot {
   return operation.kind === "file"
     ? snapshotFileTarget(operation.target)
-    : snapshotSkillTarget(operation.skill, operation.target);
+    : snapshotSkillTarget(operation.skill, operation.target, operation.exportLimits);
 }
 
 function assertTargetUnchanged(operation: LibraryUpdateOperation): void {
@@ -281,7 +316,11 @@ function assertTargetUnchanged(operation: LibraryUpdateOperation): void {
   }
 }
 
-function portableFileContents(plan: LibraryUpdatePlan, provided: Record<string, string>): Map<string, string> {
+function portableFileContents(
+  plan: LibraryUpdatePlan,
+  provided: Record<string, string>,
+  acknowledgements: readonly LibraryUpdateSecretFinding[],
+): Map<string, string> {
   const expected = plan.operations.filter(
     (operation): operation is LibraryUpdateFileOperation => operation.kind === "file",
   );
@@ -299,26 +338,51 @@ function portableFileContents(plan: LibraryUpdatePlan, provided: Record<string, 
     ) {
       throw new Error(`Portable file changed after review: ${operation.path}`);
     }
-    if (scanTextForSecrets(content).length > 0) {
+    const unacknowledgedFindings = scanTextForSecrets(content).filter(
+      (finding) =>
+        !isAcknowledgedSecretFinding(
+          { ...finding, item: operation.path, relativePath: operation.path },
+          acknowledgements,
+        ),
+    );
+    if (unacknowledgedFindings.length > 0) {
       throw new Error(`Portable file now contains possible secrets: ${operation.path}`);
     }
   }
   return actual;
 }
 
-function assertSkillSource(operation: LibraryUpdateSkillOperation): SkillExportPlan {
-  const current = planSkillExport(operation.skill, operation.sourcePlan.sourcePath);
+function assertSkillSource(
+  operation: LibraryUpdateSkillOperation,
+  acknowledgements: readonly LibraryUpdateSecretFinding[],
+): SkillExportPlan {
+  const current = planSkillExport(operation.skill, operation.sourcePlan.sourcePath, operation.exportLimits);
   if (current.sha256 !== operation.sourcePlan.sha256) {
     throw new Error(`Library update source changed after review: ${operation.skill}`);
   }
-  if (current.secretFindings.length > 0) {
+  const unacknowledgedFindings = current.secretFindings.filter(
+    (finding) =>
+      !isAcknowledgedSecretFinding(
+        {
+          ...finding,
+          item: operation.skill,
+          relativePath: `${operation.path}/${finding.relativePath}`,
+        },
+        acknowledgements,
+      ),
+  );
+  if (unacknowledgedFindings.length > 0) {
     throw new Error(`Library update source now contains possible secrets: ${operation.skill}`);
   }
   return current;
 }
 
-function stageSkill(operation: LibraryUpdateSkillOperation, destination: string): void {
-  const sourcePlan = assertSkillSource(operation);
+function stageSkill(
+  operation: LibraryUpdateSkillOperation,
+  destination: string,
+  acknowledgements: readonly LibraryUpdateSecretFinding[],
+): void {
+  const sourcePlan = assertSkillSource(operation, acknowledgements);
   mkdirSync(destination, { recursive: false });
   for (const file of sourcePlan.files) {
     const content = readFileSync(path.join(sourcePlan.sourcePath, ...file.relativePath.split("/")));
@@ -329,16 +393,21 @@ function stageSkill(operation: LibraryUpdateSkillOperation, destination: string)
     mkdirSync(path.dirname(target), { recursive: true });
     writeFileSync(target, content, { flag: "wx" });
   }
-  if (planSkillExport(operation.skill, destination).sha256 !== sourcePlan.sha256) {
+  if (planSkillExport(operation.skill, destination, operation.exportLimits).sha256 !== sourcePlan.sha256) {
     throw new Error(`Staged library update changed: ${operation.skill}`);
   }
 }
 
-function stageOperation(operation: LibraryUpdateOperation, stagePath: string, files: Map<string, string>): void {
+function stageOperation(
+  operation: LibraryUpdateOperation,
+  stagePath: string,
+  files: Map<string, string>,
+  acknowledgements: readonly LibraryUpdateSecretFinding[],
+): void {
   rmSync(stagePath, { recursive: true, force: true });
   mkdirSync(path.dirname(stagePath), { recursive: true });
   if (operation.kind === "skill") {
-    stageSkill(operation, stagePath);
+    stageSkill(operation, stagePath, acknowledgements);
     return;
   }
   const content = files.get(operation.path);
@@ -442,16 +511,20 @@ export function applyLibraryUpdatePlan(
   const { planId, ...payload } = plan;
   if (computePlanId(payload) !== planId) throw new Error("Library update plan is stale or modified");
   if (plan.hasConflicts) throw new Error("Library update plan contains target conflicts");
-  if (plan.secretFindings.length > 0) {
-    throw new Error(`Library update is blocked by ${plan.secretFindings.length} possible secret finding(s)`);
+  const unacknowledgedSecretFindings = plan.secretFindings.filter(
+    (finding) => !isAcknowledgedSecretFinding(finding, options.acknowledgedSecretFindings ?? []),
+  );
+  if (unacknowledgedSecretFindings.length > 0) {
+    throw new Error(`Library update is blocked by ${unacknowledgedSecretFindings.length} possible secret finding(s)`);
   }
-  const files = portableFileContents(plan, options.portableFiles);
+  const acknowledgements = options.acknowledgedSecretFindings ?? [];
+  const files = portableFileContents(plan, options.portableFiles, acknowledgements);
   const journalPath = options.journalPath ?? libraryUpdateJournalPath(plan.root);
   if (existsSync(journalPath)) throw new Error("An unfinished library update requires recovery first");
   assertRootUnchanged(plan);
   for (const operation of plan.operations) {
     assertTargetUnchanged(operation);
-    if (operation.kind === "skill") assertSkillSource(operation);
+    if (operation.kind === "skill") assertSkillSource(operation, acknowledgements);
   }
   const nonce = randomUUID();
   const journal: LibraryUpdateJournal = {
@@ -471,7 +544,7 @@ export function applyLibraryUpdatePlan(
   writeJournal(journalPath, journal);
   try {
     for (const entry of journal.entries) {
-      stageOperation(entry.operation, entry.stagePath, files);
+      stageOperation(entry.operation, entry.stagePath, files, acknowledgements);
       entry.status = "staged";
       writeJournal(journalPath, journal);
     }
@@ -499,10 +572,14 @@ export function applyLibraryUpdatePlan(
       operation: options.historyOperation ?? "library-update",
       sourcePlanId: planId,
       recordId: journal.historyId,
+      ...(options.historyRetention ? { retention: options.historyRetention } : {}),
       changes: journal.entries.map((entry) => ({
         path: entry.operation.path,
         itemKind: entry.operation.kind,
         ...(entry.operation.kind === "skill" ? { skill: entry.operation.skill } : {}),
+        ...(entry.operation.kind === "skill" && entry.operation.exportLimits
+          ? { exportLimits: entry.operation.exportLimits }
+          : {}),
         postcondition: (entry.operation.kind === "file"
           ? { kind: "file", sha256: entry.operation.sha256 }
           : { kind: "directory", integrity: entry.operation.sourcePlan.sha256 }) as HistoryTargetSnapshot,

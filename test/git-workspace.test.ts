@@ -259,23 +259,6 @@ describe("Git-backed library workspace", () => {
     expect(await applyLibraryCommit(finderMetadata)).toBeNull();
     expect((await getLibraryGitStatus(library)).changed).toBe(false);
 
-    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"personal"}\n');
-    const scope = await planLibraryCommit(library, "Add portable scope");
-    expect(scope.hasBlockers).toBe(false);
-    expect(scope.files.map((file) => file.path)).toContain("dotagents.scope.json");
-    await applyLibraryCommit(scope);
-
-    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"everywhere"}\n');
-    const invalidScope = await planLibraryCommit(library, "Invalid portable scope");
-    expect(invalidScope.hasBlockers).toBe(true);
-    expect(invalidScope.auditErrors).toContainEqual(
-      expect.objectContaining({
-        code: "invalid-scope-descriptor",
-        field: "dotagents.scope.json",
-      }),
-    );
-    writeFileSync(join(library, "dotagents.scope.json"), '{"schema_version":1,"scope":"personal"}\n');
-
     writeFileSync(join(library, ".env"), "TOKEN=secret\n");
     const unsafe = await planLibraryCommit(library, "Unsafe file");
     expect(unsafe.hasBlockers).toBe(true);
@@ -286,52 +269,11 @@ describe("Git-backed library workspace", () => {
     expect(secret.hasBlockers).toBe(true);
     expect(secret.secretFindings).toEqual([{ file: "README.md", rule: "github-token", line: 1, column: 1 }]);
     await expect(applyLibraryCommit(secret)).rejects.toThrow("blockers");
-  });
-
-  it("syncs only declared v2 resources and audits their complete content", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "dotagents-git-resources-"));
-    roots.push(parent);
-    const library = await initializedLibrary(parent, "resources");
-    const manifest = {
-      schema_version: 2,
-      resources: [
-        {
-          kind: "command",
-          id: "review",
-          path: "commands/review.md",
-          format: "markdown",
-          invocation: "review",
-        },
-      ],
-    };
-    mkdirSync(join(library, "commands"));
-    writeFileSync(join(library, "commands/review.md"), "# Review\n");
-    writeFileSync(join(library, "resources.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    await initializeLibraryGit(library);
-    const reviewed = await planLibraryCommit(library, "Add command resource");
-    expect(reviewed.hasBlockers).toBe(false);
-    expect(reviewed.files.map((file) => file.path)).toEqual(
-      expect.arrayContaining(["resources.json", "commands/review.md"]),
-    );
-    await applyLibraryCommit(reviewed);
-
-    writeFileSync(join(library, "commands/unmanaged.md"), "# Not declared\n");
-    const unmanaged = await planLibraryCommit(library, "Unmanaged resource");
-    expect(unmanaged.hasBlockers).toBe(true);
-    expect(unmanaged.unsafePaths).toContain("commands/unmanaged.md");
-    rmSync(join(library, "commands/unmanaged.md"));
-
-    const secret = "ghp_abcdefghijklmnopqrstuvwxyz123456";
-    writeFileSync(join(library, "commands/review.md"), `${secret}\n`);
-    const blocked = await planLibraryCommit(library, "Secret resource");
-    expect(blocked.hasBlockers).toBe(true);
-    expect(blocked.secretFindings).toContainEqual({
-      file: "commands/review.md",
-      rule: "github-token",
-      line: 1,
-      column: 1,
-    });
-    expect(JSON.stringify(blocked)).not.toContain(secret);
+    expect(
+      await applyLibraryCommit(secret, undefined, {
+        acknowledgedSecretFindings: secret.secretFindings,
+      }),
+    ).toMatch(/^[a-f0-9]{40}$/);
   });
 
   it("pushes and fast-forwards through a generic remote only after separate previews", async () => {

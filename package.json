@@ -1,6 +1,6 @@
 {
   "name": "dotagents",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Carry your AI-agent skills and setup across machines with a portable, Git-backed library",
   "license": "MIT",
   "repository": {
@@ -54,10 +54,6 @@
       "types": "./dist/canonical-library.d.ts",
       "import": "./dist/canonical-library.js"
     },
-    "./scope": {
-      "types": "./dist/scope.d.ts",
-      "import": "./dist/scope.js"
-    },
     "./history": {
       "types": "./dist/history.d.ts",
       "import": "./dist/history.js"
@@ -74,18 +70,6 @@
       "types": "./dist/well-known.d.ts",
       "import": "./dist/well-known.js"
     },
-    "./resource-model": {
-      "types": "./dist/resource-model.d.ts",
-      "import": "./dist/resource-model.js"
-    },
-    "./resource-apply": {
-      "types": "./dist/resource-apply.d.ts",
-      "import": "./dist/resource-apply.js"
-    },
-    "./adopt": {
-      "types": "./dist/adopt.d.ts",
-      "import": "./dist/adopt.js"
-    },
     "./library": {
       "types": "./dist/library.d.ts",
       "import": "./dist/library.js"
@@ -93,6 +77,10 @@
     "./library-publish": {
       "types": "./dist/library-publish.d.ts",
       "import": "./dist/library-publish.js"
+    },
+    "./library-removal": {
+      "types": "./dist/library-removal.d.ts",
+      "import": "./dist/library-removal.js"
     },
     "./integrity": {
       "types": "./dist/integrity.d.ts",
@@ -165,7 +153,6 @@
     "./schemas/skills.json": "./schemas/skills.schema.json",
     "./schemas/skills-lock.json": "./schemas/skills-lock.schema.json",
     "./schemas/dotagents.json": "./schemas/dotagents.schema.json",
-    "./schemas/resources.json": "./schemas/resources.schema.json",
     "./materialize": {
       "types": "./dist/materialize.d.ts",
       "import": "./dist/materialize.js"
@@ -190,6 +177,10 @@
       "types": "./dist/source-session.d.ts",
       "import": "./dist/source-session.js"
     },
+    "./global-skill-updates": {
+      "types": "./dist/global-skill-updates.d.ts",
+      "import": "./dist/global-skill-updates.js"
+    },
     "./source-migration": {
       "types": "./dist/source-migration.d.ts",
       "import": "./dist/source-migration.js"
@@ -213,6 +204,10 @@
     "./git-fast-forward": {
       "types": "./dist/git-fast-forward.d.ts",
       "import": "./dist/git-fast-forward.js"
+    },
+    "./linked-skill-package-updates": {
+      "types": "./dist/linked-skill-package-updates.d.ts",
+      "import": "./dist/linked-skill-package-updates.js"
     },
     "./machine": {
       "types": "./dist/machine.d.ts",

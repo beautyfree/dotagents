@@ -215,7 +215,12 @@ export async function discoverSkills(roots, limits = DEFAULT_DISCOVERY_LIMITS) {
     const scannedCandidates = await mapWithConcurrency(candidates, 12, async ({ candidate, root }) => {
         try {
             const actual = await realpath(candidate);
-            const scanned = await scanOwnedSkill(path.dirname(actual), path.basename(actual));
+            const scanned = await scanOwnedSkill(path.dirname(actual), path.basename(actual), undefined, {
+                // A discovery root is explicit user-visible scope. A file link that
+                // resolves inside it can be copied into a portable skill; links beyond
+                // that boundary remain a reviewable safety issue.
+                trustedFileRoots: [root.path],
+            });
             if (!scanned.ok)
                 return { root, candidate, issues: scanned.issues.map((entry) => ({ ...entry, severity: "warning" })) };
             return {

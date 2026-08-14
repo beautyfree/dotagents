@@ -109,6 +109,12 @@ describe("transactional library update", () => {
     ]);
     expect(JSON.stringify(secretPlan)).not.toContain("github_pat_");
     expect(() => applyLibraryUpdatePlan(secretPlan, { portableFiles: secretFiles })).toThrow("blocked");
+    expect(
+      applyLibraryUpdatePlan(secretPlan, {
+        portableFiles: secretFiles,
+        acknowledgedSecretFindings: secretPlan.secretFindings,
+      }).updated,
+    ).toEqual(["dotagents.yaml", "skills/writing"]);
 
     expect(() =>
       planLibraryUpdate({

@@ -49,6 +49,7 @@ function normalizeRecord(value) {
         skill_path: typeof record.skill_path === "string" ? record.skill_path : null,
         ref: typeof record.ref === "string" ? record.ref : null,
         content_sha256: typeof record.content_sha256 === "string" ? record.content_sha256 : null,
+        ...(typeof record.observed_integrity === "string" ? { observed_integrity: record.observed_integrity } : {}),
         first_seen_at: firstSeenAt,
         reviewed_at: reviewedAt,
         ownership,
@@ -138,6 +139,7 @@ export function observeLocalSkills(observed, file = sourceRegistryPath()) {
     const isFirstInventory = registry.inventory_initialized_at == null;
     const now = new Date().toISOString();
     const added = [];
+    let changed = false;
     for (const candidate of observed) {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(candidate.skill))
             continue;
@@ -145,19 +147,35 @@ export function observeLocalSkills(observed, file = sourceRegistryPath()) {
         if (existing) {
             // A lock file is stronger provenance than the anonymous local-path
             // baseline, but never overrides an owned copy or an explicit fork.
-            if ((candidate.source === "skills.sh" || candidate.source === "clawhub" || candidate.source === "git") &&
-                existing.source === "local" &&
-                existing.ownership === "unknown") {
+            const verifiedCandidateSource = candidate.source === "skills.sh" || candidate.source === "clawhub" || candidate.source === "git";
+            const sameRecordedSource = existing.source === candidate.source &&
+                (existing.repository == null || candidate.repository == null || existing.repository === candidate.repository);
+            if (verifiedCandidateSource &&
+                existing.ownership === "unknown" &&
+                (existing.source === "local" || sameRecordedSource)) {
                 registry.skills[candidate.skill] = {
                     ...existing,
-                    source: candidate.source,
+                    source: candidate.source ?? existing.source,
                     repository: candidate.repository ?? existing.repository,
                     skill_path: candidate.skill_path ?? existing.skill_path,
                     ref: candidate.ref ?? existing.ref,
                     ownership: "external",
+                    ...(existing.observed_integrity || !candidate.observed_integrity
+                        ? {}
+                        : { observed_integrity: candidate.observed_integrity }),
                     updated_at: now,
                 };
                 added.push(candidate.skill);
+                changed = true;
+            }
+            if (!existing.observed_integrity && candidate.observed_integrity) {
+                const current = registry.skills[candidate.skill] ?? existing;
+                registry.skills[candidate.skill] = {
+                    ...current,
+                    observed_integrity: candidate.observed_integrity,
+                    updated_at: now,
+                };
+                changed = true;
             }
             continue;
         }
@@ -167,6 +185,7 @@ export function observeLocalSkills(observed, file = sourceRegistryPath()) {
             skill_path: candidate.skill_path ?? null,
             ref: candidate.ref ?? null,
             content_sha256: candidate.content_sha256 ?? null,
+            ...(candidate.observed_integrity ? { observed_integrity: candidate.observed_integrity } : {}),
             first_seen_at: now,
             reviewed_at: isFirstInventory ? now : null,
             ownership: candidate.source === "skills.sh" || candidate.source === "clawhub" || candidate.source === "git"
@@ -176,8 +195,9 @@ export function observeLocalSkills(observed, file = sourceRegistryPath()) {
             updated_at: now,
         };
         added.push(candidate.skill);
+        changed = true;
     }
-    if (isFirstInventory || added.length > 0) {
+    if (isFirstInventory || changed) {
         registry.inventory_initialized_at = registry.inventory_initialized_at ?? now;
         writeRegistryState(registry, file);
     }

@@ -6,15 +6,20 @@ import { isMachineLocalMetadataPath, normalizePortablePath } from "./paths.js";
 export const DEFAULT_SKILL_EXPORT_LIMITS = {
     maxFiles: 1_000,
     maxBytes: 50 * 1024 * 1024,
-    excludedDirectories: [".git", "node_modules"],
+    excludedDirectories: [".git", "node_modules", ".agents"],
 };
 function assertSkillName(value) {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value))
         throw new Error(`Skill name must be a lowercase kebab-case identifier: ${value}`);
 }
+function isWithinRoot(target, root) {
+    const relative = path.relative(root, target);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 /**
  * Builds a deterministic, value-free, read-only export plan for an owned skill.
- * Symlinks and unsupported file types are rejected instead of being followed.
+ * Directory links and links outside reviewed roots are rejected. Regular file
+ * links inside an explicit reviewed root are materialized as portable content.
  */
 export function planSkillExport(skill, sourcePath, limits = DEFAULT_SKILL_EXPORT_LIMITS) {
     assertSkillName(skill);
@@ -26,6 +31,14 @@ export function planSkillExport(skill, sourcePath, limits = DEFAULT_SKILL_EXPORT
     if (!lstatSync(root).isDirectory())
         throw new Error(`Skill export source is not a directory: ${sourcePath}`);
     const excludedDirectories = new Set(limits.excludedDirectories);
+    const trustedRoots = [root, ...(limits.trustedFileRoots ?? [])].flatMap((candidate) => {
+        try {
+            return [realpathSync(candidate)];
+        }
+        catch {
+            return [];
+        }
+    });
     const files = [];
     const excludedPaths = [];
     const secretFindings = [];
@@ -41,8 +54,32 @@ export function planSkillExport(skill, sourcePath, limits = DEFAULT_SKILL_EXPORT
                 continue;
             }
             const entry = lstatSync(absolutePath);
-            if (entry.isSymbolicLink())
-                throw new Error(`Skill export rejects symlink: ${relativePath}`);
+            if (entry.isSymbolicLink()) {
+                let target;
+                let targetEntry;
+                try {
+                    target = realpathSync(absolutePath);
+                    targetEntry = lstatSync(target);
+                }
+                catch {
+                    throw new Error(`Skill export rejects unreadable symlink: ${relativePath}`);
+                }
+                if (!targetEntry.isFile() || !trustedRoots.some((trustedRoot) => isWithinRoot(target, trustedRoot)))
+                    throw new Error(`Skill export rejects symlink outside a reviewed root: ${relativePath}`);
+                if (files.length >= limits.maxFiles)
+                    throw new Error(`Skill export exceeds ${limits.maxFiles} files`);
+                const content = readFileSync(target);
+                totalBytes += content.length;
+                if (totalBytes > limits.maxBytes)
+                    throw new Error(`Skill export exceeds ${limits.maxBytes} bytes`);
+                if (!content.subarray(0, Math.min(content.length, 8_192)).includes(0)) {
+                    for (const finding of scanTextForSecrets(content.toString("utf8"))) {
+                        secretFindings.push({ ...finding, relativePath });
+                    }
+                }
+                files.push({ relativePath, size: content.length, sha256: createHash("sha256").update(content).digest("hex") });
+                continue;
+            }
             if (entry.isDirectory()) {
                 if (excludedDirectories.has(name)) {
                     excludedPaths.push(relativePath);

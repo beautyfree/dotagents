@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { planSkillExport } from "./export-policy.js";
 
-export type ToolkitChangeKind = "new-local" | "changed-local" | "missing-local";
+export type ToolkitChangeKind = "new-local" | "kept-local" | "changed-local" | "missing-local";
 
 export type ToolkitInventoryItem = { id: string; name: string; integrity: string };
 export type ToolkitLibraryItem = { id: string; integrity?: string };
@@ -17,20 +17,30 @@ export function classifyToolkitChanges(input: {
   items: readonly ToolkitInventoryItem[];
   library: readonly ToolkitLibraryItem[];
   observedIntegrity?: Readonly<Record<string, string>>;
+  /** Device-only choices to keep a currently unchanged skill outside this library. */
+  libraryExclusions?: Readonly<Record<string, { integrity: string }>>;
 }): ToolkitChange[] {
   const libraryById = new Map(input.library.map((item) => [item.id, item]));
   const localIds = new Set(input.items.map((item) => item.id));
   const changes = new Map<string, ToolkitChange>();
   for (const item of input.items) {
     const saved = libraryById.get(item.id);
-    if (!saved) changes.set(`new-local:${item.id}`, { id: item.id, name: item.name, kind: "new-local" });
-    else if (saved.integrity && saved.integrity !== item.integrity)
+    if (!saved) {
+      const exclusion = input.libraryExclusions?.[item.id];
+      const kind: ToolkitChangeKind = exclusion?.integrity === item.integrity ? "kept-local" : "new-local";
+      changes.set(`${kind}:${item.id}`, { id: item.id, name: item.name, kind });
+    } else if (saved.integrity && saved.integrity !== item.integrity)
       changes.set(`changed-local:${item.id}`, { id: item.id, name: item.name, kind: "changed-local" });
   }
   for (const id of Object.keys(input.observedIntegrity ?? {})) {
     if (!localIds.has(id)) changes.set(`missing-local:${id}`, { id, name: id, kind: "missing-local" });
   }
-  const rank: Record<ToolkitChangeKind, number> = { "changed-local": 0, "new-local": 1, "missing-local": 2 };
+  const rank: Record<ToolkitChangeKind, number> = {
+    "changed-local": 0,
+    "new-local": 1,
+    "missing-local": 2,
+    "kept-local": 3,
+  };
   return [...changes.values()].sort(
     (left, right) => rank[left.kind] - rank[right.kind] || left.name.localeCompare(right.name, "en"),
   );
@@ -58,7 +68,10 @@ export type ToolkitFilePreview = {
   unavailable_reason?: string;
 };
 
-const TEXT_PREVIEW_BYTES = 256 * 1024;
+// Diffs are rendered through a virtualized viewport in Skiller, so the limit
+// protects IPC and memory rather than the number of DOM rows. This comfortably
+// covers large real-world SKILL.md files such as generated tool guides.
+const TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 const IMAGE_PREVIEW_BYTES = 4 * 1024 * 1024;
 const SKILL_MD_PREVIEW_BYTES = 24_000;
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -117,7 +130,6 @@ function skillMdPreview(root: string): { text: string; truncated: boolean } | nu
 function compactDiff(saved: string | null, local: string | null): string | null {
   const before = saved?.split("\n") ?? [],
     after = local?.split("\n") ?? [];
-  if (before.length > 900 || after.length > 900) return null;
   let prefix = 0,
     suffix = 0;
   while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;

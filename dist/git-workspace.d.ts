@@ -36,6 +36,7 @@ export type GitWorkspaceSecretFinding = {
     line: number;
     column: number;
 };
+export type GitWorkspaceSecretAcknowledgement = GitWorkspaceSecretFinding;
 export interface GitClonePlan {
     kind: "git-clone";
     schemaVersion: 4;
@@ -152,7 +153,9 @@ export declare function applyLibraryClone(plan: GitClonePlan, git?: WorkspaceGit
 }): Promise<void>;
 export declare function getLibraryGitStatus(root: string, git?: WorkspaceGitPort): Promise<GitWorkspaceStatus>;
 export declare function planLibraryCommit(root: string, message: string, visibility?: GitCommitPlan["visibility"], git?: WorkspaceGitPort): Promise<GitCommitPlan>;
-export declare function applyLibraryCommit(plan: GitCommitPlan, git?: WorkspaceGitPort): Promise<string | null>;
+export declare function applyLibraryCommit(plan: GitCommitPlan, git?: WorkspaceGitPort, options?: {
+    acknowledgedSecretFindings?: readonly GitWorkspaceSecretAcknowledgement[];
+}): Promise<string | null>;
 export declare function fetchLibrary(root: string, sourcePolicy?: SourceSecurityPolicyInput, git?: WorkspaceGitPort, options?: {
     signal?: AbortSignal;
 }): Promise<void>;

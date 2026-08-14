@@ -28,5 +28,7 @@ export declare function inspectGitFastForwardPlan<T>(plan: GitFastForwardPlan, i
     signal?: AbortSignal;
 }): Promise<T>;
 /** Applies only the exact fast-forward that was previously reviewed. */
-export declare function applyGitFastForwardPlan(plan: GitFastForwardPlan, git?: WorkspaceGitPort): Promise<string>;
+export declare function applyGitFastForwardPlan(plan: GitFastForwardPlan, git?: WorkspaceGitPort, options?: {
+    signal?: AbortSignal;
+}): Promise<string>;
 //# sourceMappingURL=git-fast-forward.d.ts.map

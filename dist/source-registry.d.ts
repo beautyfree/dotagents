@@ -4,6 +4,12 @@ export interface LocalSkillSourceRecord {
     skill_path: string | null;
     ref: string | null;
     content_sha256: string | null;
+    /**
+     * Canonical content fingerprint captured when the local skill was first
+     * observed. Unlike content_sha256 (a legacy export hash), this is the
+     * discovery integrity hash used to detect local edits safely.
+     */
+    observed_integrity?: string | null;
     /** First time dotagents recorded this skill on this computer. */
     first_seen_at: string;
     /** Set after a person has acknowledged a newly discovered skill. */
@@ -25,6 +31,7 @@ export type ObservedLocalSkill = {
     skill_path?: string | null;
     ref?: string | null;
     content_sha256?: string | null;
+    observed_integrity?: string | null;
 };
 export declare function sourceRegistryPath(environment?: NodeJS.ProcessEnv, home?: string, platform?: NodeJS.Platform): string;
 export declare function readLocalSkillSources(file?: string): Record<string, LocalSkillSourceRecord>;

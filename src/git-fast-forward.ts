@@ -145,10 +145,12 @@ export async function inspectGitFastForwardPlan<T>(
 export async function applyGitFastForwardPlan(
   plan: GitFastForwardPlan,
   git: WorkspaceGitPort = new NodeWorkspaceGitPort(),
+  options: { signal?: AbortSignal } = {},
 ): Promise<string> {
   assertPlanId(plan);
-  const current = await planGitFastForward(plan.workspace, plan.sourcePolicy, git);
+  const current = await planGitFastForward(plan.workspace, plan.sourcePolicy, git, options);
   if (current.planId !== plan.planId) throw new Error("Remote or local Git state changed after review");
-  if (plan.baseHead !== plan.remoteHead) await git.run(["merge", "--ff-only", plan.remoteHead], plan.workspace);
-  return git.run(["rev-parse", "HEAD"], plan.workspace);
+  if (plan.baseHead !== plan.remoteHead)
+    await git.run(["merge", "--ff-only", plan.remoteHead], plan.workspace, options);
+  return git.run(["rev-parse", "HEAD"], plan.workspace, options);
 }

@@ -7,6 +7,7 @@ export const DOTAGENTS_CONFIG_VERSION = 1;
 export const DOTAGENTS_CONFIG_FILE = "dotagents.yaml";
 export const DOTAGENTS_LOCAL_CONFIG_FILE = "dotagents.local.yaml";
 const slug = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+const contentHash = z.string().regex(/^[a-f0-9]{64}$/);
 const vendoredOriginSchema = z
     .object({
     url: z.string().min(1).max(2_048),
@@ -159,6 +160,14 @@ export const localConfigSchema = z
         .optional(),
     materialization: z.enum(["auto", "native", "symlink", "junction", "copy"]).optional(),
     exclusions: z.array(slug).default([]),
+    /**
+     * Per-device choices for skills that intentionally stay outside one
+     * canonical library.  This file is gitignored, so a choice on one
+     * computer never hides a skill from another person's review queue.
+     */
+    library_exclusions: z.record(slug, z.object({ integrity: contentHash }).strict()).default({}),
+    /** Skills recently added to this library on this device, keyed by add time. */
+    library_recently_added: z.record(slug, z.string().datetime()).default({}),
     environment: z.record(slug, envReference).default({}),
     source_security: sourceSecurityPolicySchema.optional(),
 })
@@ -193,6 +202,7 @@ export function mergeConfig(portable, local) {
         agents: "local",
         materialization: "local",
         exclusions: "local",
+        libraryExclusions: "local",
         environment: "local",
         sourceSecurity: "local",
     };
@@ -202,6 +212,7 @@ export function mergeConfig(portable, local) {
         agents: local?.agents ?? {},
         materialization: local?.materialization ?? "auto",
         exclusions: [...(local?.exclusions ?? [])].sort(),
+        libraryExclusions: { ...(local?.library_exclusions ?? {}) },
         environment: Object.fromEntries(Object.entries(local?.environment ?? {}).sort(([a], [b]) => a.localeCompare(b))),
         sourceSecurity: local?.source_security ?? DENY_ALL_SOURCE_SECURITY_POLICY,
         provenance,

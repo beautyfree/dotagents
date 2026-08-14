@@ -9,8 +9,6 @@ import { normalizeGitIdentity } from "./git-identity.js";
 import { loadLibrary } from "./library.js";
 import { isMachineLocalMetadataPath, normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
-import { resourceManifestSchema, scanResourceManifest } from "./resource-model.js";
-import { SCOPE_DESCRIPTOR_FILE, readPortableScopeDescriptor } from "./scope.js";
 import {
   parseSourceSecurityPolicy,
   requireMinimumReleaseAge,
@@ -79,6 +77,8 @@ export type GitWorkspaceSecretFinding = {
   line: number;
   column: number;
 };
+
+export type GitWorkspaceSecretAcknowledgement = GitWorkspaceSecretFinding;
 
 export interface GitClonePlan {
   kind: "git-clone";
@@ -267,85 +267,11 @@ function portableGitPath(filePath: string): string | null {
   const normalized = normalizePortablePath(filePath);
   if (!normalized) return null;
   const allowedFile =
-    /^(?:skills\.json|skills\.lock|resources\.json|dotagents\.yaml|dotagents\.scope\.json|README(?:\.[^/]+)?|LICENSE(?:\.[^/]+)?|NOTICE(?:\.[^/]+)?|\.gitignore)$/i.test(
+    /^(?:skills\.json|skills\.lock|dotagents\.yaml|README(?:\.[^/]+)?|LICENSE(?:\.[^/]+)?|NOTICE(?:\.[^/]+)?|\.gitignore)$/i.test(
       normalized,
     );
-  const allowedTree = /^(?:skills|instructions|commands|subagents|docs|assets|examples)\//.test(normalized);
+  const allowedTree = /^(?:skills|docs|assets|examples)\//.test(normalized);
   return allowedFile || allowedTree ? normalized : null;
-}
-
-type ResourceGitAudit = {
-  secretFindings: GitWorkspaceSecretFinding[];
-  unsafePaths: string[];
-  auditErrors: GitCommitPlan["auditErrors"];
-};
-
-function auditPortableScope(root: string): GitCommitPlan["auditErrors"] {
-  try {
-    readPortableScopeDescriptor(root);
-    return [];
-  } catch {
-    return [
-      {
-        code: "invalid-scope-descriptor",
-        message: `${SCOPE_DESCRIPTOR_FILE} could not be verified safely`,
-        remediation: `Replace ${SCOPE_DESCRIPTOR_FILE} with a bounded regular JSON file using scope personal or project.`,
-        field: SCOPE_DESCRIPTOR_FILE,
-      },
-    ];
-  }
-}
-
-async function auditPortableResources(root: string, repositoryPaths: string[]): Promise<ResourceGitAudit> {
-  const manifestPath = path.join(root, "resources.json");
-  const resourceTreePaths = repositoryPaths.filter((entry) => /^(?:instructions|commands|subagents)\//.test(entry));
-  if (!(await exists(manifestPath))) {
-    return {
-      secretFindings: [],
-      unsafePaths: resourceTreePaths,
-      auditErrors: [],
-    };
-  }
-  try {
-    const metadata = await lstat(manifestPath);
-    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size > 1024 * 1024) {
-      throw new Error("resources.json must be a bounded regular file");
-    }
-    const manifest = resourceManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
-    const declared = manifest.resources.map((resource) => ({
-      kind: resource.kind,
-      path: resource.path,
-    }));
-    const unsafePaths = resourceTreePaths.filter(
-      (candidate) =>
-        !declared.some((resource) =>
-          resource.kind === "skill" ? candidate.startsWith(`${resource.path}/`) : candidate === resource.path,
-        ),
-    );
-    const scanned = await scanResourceManifest(root, manifest);
-    const secretFindings = scanned.resources.flatMap((resource) =>
-      resource.secretFindings.map((finding) => ({
-        file: resource.kind === "skill" ? `${resource.path}/${finding.relativePath}` : finding.relativePath,
-        rule: finding.rule,
-        line: finding.line,
-        column: finding.column,
-      })),
-    );
-    return { secretFindings, unsafePaths, auditErrors: [] };
-  } catch (error) {
-    return {
-      secretFindings: [],
-      unsafePaths: resourceTreePaths,
-      auditErrors: [
-        {
-          code: "invalid-resource-manifest",
-          message: error instanceof Error ? error.message : "resources.json could not be reviewed safely",
-          remediation: "Repair resources.json and every declared data resource before syncing the library.",
-          field: "resources.json",
-        },
-      ],
-    };
-  }
 }
 
 function uniqueSecretFindings(findings: GitWorkspaceSecretFinding[]): GitWorkspaceSecretFinding[] {
@@ -837,18 +763,14 @@ export async function planLibraryCommit(
   if (!commitMessage || commitMessage.length > 200 || /[\r\n\0]/.test(commitMessage))
     throw new Error("Commit message must be one line between 1 and 200 characters");
   const paths = await changedLibraryPaths(library, git);
-  const repositoryPaths = [
-    ...new Set([...parseNullPaths(await git.run(["ls-files", "-z"], library, { raw: true })), ...paths.changed]),
-  ];
-  const [snapshot, report, resourceAudit, baseHead] = await Promise.all([
+  const [snapshot, report, baseHead] = await Promise.all([
     snapshotFiles(library, paths.changed),
     auditLibrary({ root: library, visibility }),
-    auditPortableResources(library, repositoryPaths),
     gitHead(library, git),
   ]);
-  const errors = [...auditErrors(report), ...resourceAudit.auditErrors, ...auditPortableScope(library)];
-  const secretFindings = uniqueSecretFindings([...snapshot.secretFindings, ...resourceAudit.secretFindings]);
-  const unsafePaths = [...new Set([...snapshot.unsafePaths, ...resourceAudit.unsafePaths, ...paths.ignored])].sort();
+  const errors = auditErrors(report);
+  const secretFindings = uniqueSecretFindings(snapshot.secretFindings);
+  const unsafePaths = [...new Set([...snapshot.unsafePaths, ...paths.ignored])].sort();
   const payload = {
     kind: "git-commit" as const,
     schemaVersion: 1 as const,
@@ -868,11 +790,24 @@ export async function planLibraryCommit(
 export async function applyLibraryCommit(
   plan: GitCommitPlan,
   git: WorkspaceGitPort = new NodeWorkspaceGitPort(),
+  options: { acknowledgedSecretFindings?: readonly GitWorkspaceSecretAcknowledgement[] } = {},
 ): Promise<string | null> {
   assertPlanId(plan);
   const current = await planLibraryCommit(plan.library, plan.message, plan.visibility, git);
   if (current.planId !== plan.planId) throw new Error("Library changed after the commit preview");
-  if (plan.hasBlockers) throw new Error("Commit plan contains security or portability blockers");
+  const unacknowledgedSecretFindings = plan.secretFindings.filter(
+    (finding) =>
+      !(options.acknowledgedSecretFindings ?? []).some(
+        (acknowledgement) =>
+          acknowledgement.file === finding.file &&
+          acknowledgement.rule === finding.rule &&
+          acknowledgement.line === finding.line &&
+          acknowledgement.column === finding.column,
+      ),
+  );
+  if (unacknowledgedSecretFindings.length > 0 || plan.unsafePaths.length > 0 || plan.auditErrors.length > 0) {
+    throw new Error("Commit plan contains security or portability blockers");
+  }
   if (plan.files.length === 0) return null;
   await git.run(["add", "-A", "--", ...plan.files.map((file) => file.path)], plan.library);
   await git.run(["commit", "-m", plan.message], plan.library);
@@ -952,23 +887,10 @@ export async function planLibraryPull(
     secretFindings: [],
   };
   let errors: GitPullPlan["auditErrors"] = [];
-  let resourceAudit: ResourceGitAudit = {
-    secretFindings: [],
-    unsafePaths: [],
-    auditErrors: [],
-  };
   try {
     await git.run(["worktree", "add", "--detach", worktree, remoteHead], library);
-    const repositoryPaths = parseNullPaths(await git.run(["ls-files", "-z"], worktree, { raw: true }));
-    [snapshot, resourceAudit] = await Promise.all([
-      snapshotFiles(worktree, files),
-      auditPortableResources(worktree, repositoryPaths),
-    ]);
-    errors = [
-      ...auditErrors(await auditLibrary({ root: worktree, visibility })),
-      ...resourceAudit.auditErrors,
-      ...auditPortableScope(worktree),
-    ];
+    snapshot = await snapshotFiles(worktree, files);
+    errors = auditErrors(await auditLibrary({ root: worktree, visibility }));
   } finally {
     try {
       await git.run(["worktree", "remove", "--force", worktree], library);
@@ -986,15 +908,10 @@ export async function planLibraryPull(
     baseHead: before.head,
     remoteHead,
     files,
-    secretFindings: uniqueSecretFindings([...snapshot.secretFindings, ...resourceAudit.secretFindings]),
-    unsafePaths: [...new Set([...snapshot.unsafePaths, ...resourceAudit.unsafePaths])].sort(),
+    secretFindings: uniqueSecretFindings(snapshot.secretFindings),
+    unsafePaths: snapshot.unsafePaths,
     auditErrors: errors,
-    hasBlockers:
-      snapshot.secretFindings.length > 0 ||
-      resourceAudit.secretFindings.length > 0 ||
-      snapshot.unsafePaths.length > 0 ||
-      resourceAudit.unsafePaths.length > 0 ||
-      errors.length > 0,
+    hasBlockers: snapshot.secretFindings.length > 0 || snapshot.unsafePaths.length > 0 || errors.length > 0,
     remoteIdentity: reviewedRemote.remoteIdentity,
     ...age,
     sourcePolicy: reviewedRemote.sourcePolicy,

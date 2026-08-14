@@ -532,12 +532,6 @@ export function agentCatalogEntryToDescriptor(entry, options = {}) {
             })),
         ],
         skills,
-        resources: {
-            skill: { support: "native", adapter: "agent-skill-directory" },
-            instruction: { support: "unsupported" },
-            command: { support: "unsupported" },
-            subagent: { support: "unsupported" },
-        },
     };
 }
 export function builtinAgentDescriptors(options = {}) {

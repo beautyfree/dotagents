@@ -14,7 +14,7 @@ import {
 import path from "node:path";
 import { z } from "zod";
 import { scanTextForSecrets } from "./audit.js";
-import { planSkillExport } from "./export-policy.js";
+import { planSkillExport, type SkillExportLimits } from "./export-policy.js";
 import { normalizePortablePath } from "./paths.js";
 import { computePlanId } from "./plan.js";
 
@@ -34,6 +34,15 @@ const historyChangeSchema = z
     path: z.string().min(1),
     itemKind: z.enum(["file", "skill"]),
     skill: z.string().min(1).optional(),
+    export_limits: z
+      .object({
+        maxFiles: z.number().int().positive(),
+        maxBytes: z.number().int().positive(),
+        excludedDirectories: z.array(z.string()),
+        trustedFileRoots: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
     postcondition: snapshotSchema,
     inverse: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("absent") }).strict(),
@@ -81,6 +90,8 @@ export interface OperationHistoryChangeInput {
   path: string;
   itemKind: "file" | "skill";
   skill?: string;
+  /** Retain a non-default reviewed export budget for a future undo check. */
+  exportLimits?: SkillExportLimits;
   postcondition: HistoryTargetSnapshot;
   /** Transaction backup of the previous target. Absent means the target was newly created. */
   previousPath?: string;
@@ -111,6 +122,18 @@ export const DEFAULT_OPERATION_HISTORY_RETENTION: OperationHistoryRetention = {
 
 function sha256(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function storedExportLimits(
+  value: OperationHistoryRecord["changes"][number]["export_limits"],
+): SkillExportLimits | undefined {
+  if (!value) return undefined;
+  return {
+    maxFiles: value.maxFiles,
+    maxBytes: value.maxBytes,
+    excludedDirectories: value.excludedDirectories,
+    ...(value.trustedFileRoots ? { trustedFileRoots: value.trustedFileRoots } : {}),
+  };
 }
 
 function portableRelativePath(value: string): string {
@@ -187,7 +210,12 @@ export function pruneOperationHistory(
   }
 }
 
-function snapshotTarget(target: string, itemKind: "file" | "skill", skill?: string): HistoryTargetSnapshot {
+function snapshotTarget(
+  target: string,
+  itemKind: "file" | "skill",
+  skill?: string,
+  exportLimits?: SkillExportLimits,
+): HistoryTargetSnapshot {
   if (!existsSync(target)) return { kind: "absent" };
   const metadata = lstatSync(target);
   if (itemKind === "file") {
@@ -197,13 +225,13 @@ function snapshotTarget(target: string, itemKind: "file" | "skill", skill?: stri
   if (!skill || !metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("History skill target is not a regular directory");
   }
-  return { kind: "directory", integrity: planSkillExport(skill, target).sha256 };
+  return { kind: "directory", integrity: planSkillExport(skill, target, exportLimits).sha256 };
 }
 
 function payloadIsSensitive(previousPath: string, input: OperationHistoryChangeInput): boolean {
   if (input.itemKind === "file") return scanTextForSecrets(readFileSync(previousPath, "utf8")).length > 0;
   if (!input.skill) throw new Error(`History skill name is missing for ${input.path}`);
-  return planSkillExport(input.skill, previousPath).secretFindings.length > 0;
+  return planSkillExport(input.skill, previousPath, input.exportLimits).secretFindings.length > 0;
 }
 
 /**
@@ -245,7 +273,7 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
         });
         continue;
       }
-      const previous = snapshotTarget(raw.previousPath, raw.itemKind, raw.skill);
+      const previous = snapshotTarget(raw.previousPath, raw.itemKind, raw.skill, raw.exportLimits);
       if (payloadIsSensitive(raw.previousPath, raw)) {
         changes.push({
           path: relativePath,
@@ -259,7 +287,7 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
       const payload = `payload/${index}`;
       cpSync(raw.previousPath, path.join(staging, payload), { recursive: true, errorOnExist: true });
       if (
-        JSON.stringify(snapshotTarget(path.join(staging, payload), raw.itemKind, raw.skill)) !==
+        JSON.stringify(snapshotTarget(path.join(staging, payload), raw.itemKind, raw.skill, raw.exportLimits)) !==
         JSON.stringify(previous)
       ) {
         throw new Error(`History payload changed while copying: ${relativePath}`);
@@ -268,6 +296,18 @@ export function writeOperationHistory(root: string, input: WriteOperationHistory
         path: relativePath,
         itemKind: raw.itemKind,
         ...(raw.skill ? { skill: raw.skill } : {}),
+        ...(raw.exportLimits
+          ? {
+              export_limits: {
+                maxFiles: raw.exportLimits.maxFiles,
+                maxBytes: raw.exportLimits.maxBytes,
+                excludedDirectories: [...raw.exportLimits.excludedDirectories],
+                ...(raw.exportLimits.trustedFileRoots
+                  ? { trustedFileRoots: [...raw.exportLimits.trustedFileRoots] }
+                  : {}),
+              },
+            }
+          : {}),
         postcondition: raw.postcondition,
         inverse: { kind: "payload", payload, snapshot: previous },
       });
@@ -344,6 +384,7 @@ export interface OperationUndoChange {
   path: string;
   itemKind: "file" | "skill";
   skill?: string;
+  exportLimits?: SkillExportLimits;
   expectedCurrent: HistoryTargetSnapshot;
   inverse: Extract<OperationHistoryRecord["changes"][number]["inverse"], { kind: "absent" | "payload" }>;
   reason?: string;
@@ -364,7 +405,13 @@ export function planOperationUndo(root: string, historyId: string): OperationUnd
   if (record.undone_at) throw new Error("This operation has already been undone");
   const targetRoot = path.resolve(record.target_root);
   const changes: OperationUndoChange[] = record.changes.map((change) => {
-    const current = snapshotTarget(path.join(targetRoot, ...change.path.split("/")), change.itemKind, change.skill);
+    const exportLimits = storedExportLimits(change.export_limits);
+    const current = snapshotTarget(
+      path.join(targetRoot, ...change.path.split("/")),
+      change.itemKind,
+      change.skill,
+      exportLimits,
+    );
     const reason =
       change.inverse.kind === "unavailable"
         ? change.inverse.reason === "sensitive-previous-content"
@@ -378,6 +425,7 @@ export function planOperationUndo(root: string, historyId: string): OperationUnd
       path: change.path,
       itemKind: change.itemKind,
       ...(change.skill ? { skill: change.skill } : {}),
+      ...(exportLimits ? { exportLimits } : {}),
       expectedCurrent: change.postcondition,
       inverse,
       ...(reason ? { reason } : {}),
@@ -482,7 +530,7 @@ export function applyOperationUndo(root: string, plan: OperationUndoPlan): { pla
     const recordDirectory = path.dirname(operationHistoryRecordPath(historyRoot, plan.historyId));
     for (const entry of journal.entries) {
       if (
-        JSON.stringify(snapshotTarget(entry.target, entry.itemKind, entry.skill)) !==
+        JSON.stringify(snapshotTarget(entry.target, entry.itemKind, entry.skill, entry.exportLimits)) !==
         JSON.stringify(entry.expectedCurrent)
       ) {
         throw new Error(`Operation Undo target changed after review: ${entry.path}`);
@@ -490,7 +538,8 @@ export function applyOperationUndo(root: string, plan: OperationUndoPlan): { pla
       if (entry.inverse.kind === "payload") {
         const source = path.join(recordDirectory, ...entry.inverse.payload.split("/"));
         if (
-          JSON.stringify(snapshotTarget(source, entry.itemKind, entry.skill)) !== JSON.stringify(entry.inverse.snapshot)
+          JSON.stringify(snapshotTarget(source, entry.itemKind, entry.skill, entry.exportLimits)) !==
+          JSON.stringify(entry.inverse.snapshot)
         ) {
           throw new Error(`Operation Undo payload changed after review: ${entry.path}`);
         }

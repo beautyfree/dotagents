@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type SkillExportLimits } from "./export-policy.js";
 export declare const OPERATION_HISTORY_VERSION: 2;
 export declare const OPERATION_UNDO_JOURNAL_VERSION: 1;
 declare const snapshotSchema: z.ZodDiscriminatedUnion<"kind", [z.ZodObject<{
@@ -38,6 +39,22 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
         path: z.ZodString;
         itemKind: z.ZodEnum<["file", "skill"]>;
         skill: z.ZodOptional<z.ZodString>;
+        export_limits: z.ZodOptional<z.ZodObject<{
+            maxFiles: z.ZodNumber;
+            maxBytes: z.ZodNumber;
+            excludedDirectories: z.ZodArray<z.ZodString, "many">;
+            trustedFileRoots: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        }, "strict", z.ZodTypeAny, {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        }, {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        }>>;
         postcondition: z.ZodDiscriminatedUnion<"kind", [z.ZodObject<{
             kind: z.ZodLiteral<"absent">;
         }, "strict", z.ZodTypeAny, {
@@ -98,8 +115,6 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 kind: "directory";
             }>]>;
         }, "strict", z.ZodTypeAny, {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -109,9 +124,9 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         }, {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -121,6 +136,8 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         }>, z.ZodObject<{
             kind: z.ZodLiteral<"unavailable">;
             reason: z.ZodEnum<["sensitive-previous-content", "unsupported-previous-target"]>;
@@ -146,8 +163,6 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
         inverse: {
             kind: "absent";
         } | {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -157,11 +172,19 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         } | {
             reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
+        export_limits?: {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        } | undefined;
     }, {
         path: string;
         itemKind: "skill" | "file";
@@ -177,8 +200,6 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
         inverse: {
             kind: "absent";
         } | {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -188,20 +209,23 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         } | {
             reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
+        export_limits?: {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        } | undefined;
     }>, "many">;
     undo_available: z.ZodBoolean;
 }, "strict", z.ZodTypeAny, {
     schema_version: 2;
-    id: string;
-    operation: string;
-    source_plan_id: string;
-    completed_at: string;
-    target_root: string;
     changes: {
         path: string;
         itemKind: "skill" | "file";
@@ -217,8 +241,6 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
         inverse: {
             kind: "absent";
         } | {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -228,20 +250,28 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         } | {
             reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
+        export_limits?: {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        } | undefined;
     }[];
+    id: string;
+    operation: string;
+    source_plan_id: string;
+    completed_at: string;
+    target_root: string;
     undo_available: boolean;
 }, {
     schema_version: 2;
-    id: string;
-    operation: string;
-    source_plan_id: string;
-    completed_at: string;
-    target_root: string;
     changes: {
         path: string;
         itemKind: "skill" | "file";
@@ -257,8 +287,6 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
         inverse: {
             kind: "absent";
         } | {
-            kind: "payload";
-            payload: string;
             snapshot: {
                 kind: "absent";
             } | {
@@ -268,12 +296,25 @@ declare const operationHistoryRecordSchema: z.ZodObject<{
                 integrity: string;
                 kind: "directory";
             };
+            kind: "payload";
+            payload: string;
         } | {
             reason: "sensitive-previous-content" | "unsupported-previous-target";
             kind: "unavailable";
         };
         skill?: string | undefined;
+        export_limits?: {
+            maxFiles: number;
+            maxBytes: number;
+            excludedDirectories: string[];
+            trustedFileRoots?: string[] | undefined;
+        } | undefined;
     }[];
+    id: string;
+    operation: string;
+    source_plan_id: string;
+    completed_at: string;
+    target_root: string;
     undo_available: boolean;
 }>;
 type StoredOperationHistoryRecord = z.infer<typeof operationHistoryRecordSchema>;
@@ -284,6 +325,8 @@ export interface OperationHistoryChangeInput {
     path: string;
     itemKind: "file" | "skill";
     skill?: string;
+    /** Retain a non-default reviewed export budget for a future undo check. */
+    exportLimits?: SkillExportLimits;
     postcondition: HistoryTargetSnapshot;
     /** Transaction backup of the previous target. Absent means the target was newly created. */
     previousPath?: string;
@@ -323,6 +366,7 @@ export interface OperationUndoChange {
     path: string;
     itemKind: "file" | "skill";
     skill?: string;
+    exportLimits?: SkillExportLimits;
     expectedCurrent: HistoryTargetSnapshot;
     inverse: Extract<OperationHistoryRecord["changes"][number]["inverse"], {
         kind: "absent" | "payload";
