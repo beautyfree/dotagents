@@ -4,6 +4,14 @@ All notable changes to `dotagents` are recorded here. The project follows semant
 
 ## Unreleased
 
+## [0.4.1] - 2026-10-23
+
+### Added
+
+- Allow reviewed global skill updates to keep transaction history in a
+  device-local store outside the managed skills directory, while recording the
+  actual target root and preserving rollback cleanup after interruption.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added

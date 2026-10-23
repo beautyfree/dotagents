@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { discoverSkills } from "../src/discovery.js";
+import { listOperationHistory } from "../src/history.js";
 import {
   applyReviewedManagedSkillUpdates,
   checkGlobalSkillUpdates,
@@ -309,6 +310,7 @@ it("never calls a changed local copy an update-ready item", async () => {
 it("atomically replaces a reviewed managed copy only when both fingerprints still match", async () => {
   const local = root();
   const remote = root();
+  const stateRoot = root();
   skill(local, "writing", "local v1");
   skill(remote, "writing", "remote v2");
   const localReport = await discoverSkills([{ path: local, kind: "shared" }]);
@@ -316,6 +318,7 @@ it("atomically replaces a reviewed managed copy only when both fingerprints stil
   const progress: Array<{ done: number; total: number; phase: string }> = [];
   const result = await applyReviewedManagedSkillUpdates({
     root: local,
+    historyRoot: stateRoot,
     sources: {
       writing: {
         source: "git",
@@ -352,6 +355,10 @@ it("atomically replaces a reviewed managed copy only when both fingerprints stil
   expect((await discoverSkills([{ path: local, kind: "shared" }])).skills[0]!.integrity).toBe(
     remoteReport.skills[0]!.integrity,
   );
+  expect(listOperationHistory(stateRoot)).toMatchObject([
+    expect.objectContaining({ target_root: local, operation: "library-update" }),
+  ]);
+  expect(existsSync(path.join(local, ".dotagents", "history"))).toBe(false);
   expect(progress).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ done: 0, total: 1, phase: "preparing" }),

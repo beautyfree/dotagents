@@ -289,8 +289,9 @@ function rollbackLibraryUpdate(filePath, journal) {
             rmSync(entry.operation.target, { recursive: true, force: true });
         }
     }
-    if (journal.historyId)
-        removeOperationHistory(path.dirname(path.dirname(filePath)), journal.historyId);
+    if (journal.historyId) {
+        removeOperationHistory(journal.historyRoot ?? path.dirname(path.dirname(filePath)), journal.historyId);
+    }
     rmSync(filePath, { force: true });
 }
 export function hasLibraryUpdateRecovery(journalPath) {
@@ -363,6 +364,7 @@ export function applyLibraryUpdatePlan(plan, options) {
         planId,
         phase: "applying",
         historyId: null,
+        ...(options.historyRoot ? { historyRoot: path.resolve(options.historyRoot) } : {}),
         entries: plan.operations.map((operation) => ({
             operation,
             stagePath: `${operation.target}.dotagents-stage-${nonce}`,
@@ -399,10 +401,12 @@ export function applyLibraryUpdatePlan(plan, options) {
         }
         journal.historyId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${planId.slice(0, 12)}-${nonce.slice(0, 8)}`;
         writeJournal(journalPath, journal);
-        const history = writeOperationHistory(plan.root, {
+        const historyRoot = options.historyRoot ?? plan.root;
+        const history = writeOperationHistory(historyRoot, {
             operation: options.historyOperation ?? "library-update",
             sourcePlanId: planId,
             recordId: journal.historyId,
+            targetRoot: plan.root,
             ...(options.historyRetention ? { retention: options.historyRetention } : {}),
             changes: journal.entries.map((entry) => ({
                 path: entry.operation.path,

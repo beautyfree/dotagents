@@ -65,6 +65,8 @@ export type ReviewedManagedSkillUpdate = {
 };
 export type ApplyReviewedManagedSkillUpdatesOptions = Omit<GlobalSkillUpdateCheckOptions, "roots" | "managedRoots" | "sources" | "onProgress"> & {
     root: string;
+    /** Optional device-local history root. Updated skill files remain under `root`. */
+    historyRoot?: string;
     sources: Record<string, LocalSkillSourceRecord>;
     updates: ReviewedManagedSkillUpdate[];
     /** Reports user-visible milestones without exposing source paths. */

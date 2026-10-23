@@ -77,6 +77,8 @@ export interface ApplyLibraryUpdateOptions {
      */
     acknowledgedSecretFindings?: readonly LibraryUpdateSecretFinding[];
     journalPath?: string;
+    /** Store undo history under another device-local root while keeping targets rooted at the library. */
+    historyRoot?: string;
     /** Override only for a reviewed operation which explicitly needs more local undo history. */
     historyRetention?: Partial<OperationHistoryRetention>;
     /** Human-readable origin retained in Device-local history. */
@@ -103,6 +105,8 @@ type LibraryUpdateJournal = {
     planId: string;
     phase: "applying" | "completed" | "rolling-back";
     historyId: string | null;
+    /** Root used for operation history; absent in journals written before this field existed. */
+    historyRoot?: string;
     entries: LibraryUpdateJournalEntry[];
 };
 export interface LibraryUpdateRecoveryPreview {

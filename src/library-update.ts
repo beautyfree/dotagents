@@ -88,6 +88,8 @@ export interface ApplyLibraryUpdateOptions {
    */
   acknowledgedSecretFindings?: readonly LibraryUpdateSecretFinding[];
   journalPath?: string;
+  /** Store undo history under another device-local root while keeping targets rooted at the library. */
+  historyRoot?: string;
   /** Override only for a reviewed operation which explicitly needs more local undo history. */
   historyRetention?: Partial<OperationHistoryRetention>;
   /** Human-readable origin retained in Device-local history. */
@@ -132,6 +134,8 @@ type LibraryUpdateJournal = {
   planId: string;
   phase: "applying" | "completed" | "rolling-back";
   historyId: string | null;
+  /** Root used for operation history; absent in journals written before this field existed. */
+  historyRoot?: string;
   entries: LibraryUpdateJournalEntry[];
 };
 
@@ -455,7 +459,9 @@ function rollbackLibraryUpdate(filePath: string, journal: LibraryUpdateJournal):
       rmSync(entry.operation.target, { recursive: true, force: true });
     }
   }
-  if (journal.historyId) removeOperationHistory(path.dirname(path.dirname(filePath)), journal.historyId);
+  if (journal.historyId) {
+    removeOperationHistory(journal.historyRoot ?? path.dirname(path.dirname(filePath)), journal.historyId);
+  }
   rmSync(filePath, { force: true });
 }
 
@@ -533,6 +539,7 @@ export function applyLibraryUpdatePlan(
     planId,
     phase: "applying",
     historyId: null,
+    ...(options.historyRoot ? { historyRoot: path.resolve(options.historyRoot) } : {}),
     entries: plan.operations.map((operation) => ({
       operation,
       stagePath: `${operation.target}.dotagents-stage-${nonce}`,
@@ -568,10 +575,12 @@ export function applyLibraryUpdatePlan(
     }
     journal.historyId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${planId.slice(0, 12)}-${nonce.slice(0, 8)}`;
     writeJournal(journalPath, journal);
-    const history = writeOperationHistory(plan.root, {
+    const historyRoot = options.historyRoot ?? plan.root;
+    const history = writeOperationHistory(historyRoot, {
       operation: options.historyOperation ?? "library-update",
       sourcePlanId: planId,
       recordId: journal.historyId,
+      targetRoot: plan.root,
       ...(options.historyRetention ? { retention: options.historyRetention } : {}),
       changes: journal.entries.map((entry) => ({
         path: entry.operation.path,

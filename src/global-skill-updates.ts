@@ -81,6 +81,8 @@ export type ApplyReviewedManagedSkillUpdatesOptions = Omit<
   "roots" | "managedRoots" | "sources" | "onProgress"
 > & {
   root: string;
+  /** Optional device-local history root. Updated skill files remain under `root`. */
+  historyRoot?: string;
   sources: Record<string, LocalSkillSourceRecord>;
   updates: ReviewedManagedSkillUpdate[];
   /** Reports user-visible milestones without exposing source paths. */
@@ -531,6 +533,7 @@ export async function applyReviewedManagedSkillUpdates(
     const applied = applyLibraryUpdatePlan(plan, {
       portableFiles: {},
       historyOperation: "library-update",
+      ...(options.historyRoot ? { historyRoot: options.historyRoot } : {}),
       historyRetention: GLOBAL_UPDATE_HISTORY_RETENTION,
     });
     const refreshed = await discoverSkills([{ path: root, kind: "shared" }]);

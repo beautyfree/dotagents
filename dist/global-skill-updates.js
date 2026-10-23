@@ -397,6 +397,7 @@ export async function applyReviewedManagedSkillUpdates(options) {
         const applied = applyLibraryUpdatePlan(plan, {
             portableFiles: {},
             historyOperation: "library-update",
+            ...(options.historyRoot ? { historyRoot: options.historyRoot } : {}),
             historyRetention: GLOBAL_UPDATE_HISTORY_RETENTION,
         });
         const refreshed = await discoverSkills([{ path: root, kind: "shared" }]);

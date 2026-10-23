@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { planSkillExport } from "../src/export-policy.js";
+import { listOperationHistory } from "../src/history.js";
 import {
   applyLibraryUpdatePlan,
   type LibraryUpdatePlan,
@@ -60,6 +61,59 @@ describe("transactional library update", () => {
     expect(applyLibraryUpdatePlan(review, { portableFiles: files }).updated).toEqual(["skills.json", "skills/writing"]);
     expect(readFileSync(path.join(current.workspace, "skills.json"), "utf8")).toBe(files["skills.json"]);
     expect(readFileSync(path.join(current.workspace, "skills", "writing", "SKILL.md"), "utf8")).toBe("# Writing\n");
+  });
+
+  it("stores history outside the library while keeping the target root and recovery journal stable", () => {
+    const current = fixture();
+    const stateRoot = path.join(current.root, "device-state");
+    const files = { "skills.json": '{"skills":["skills/writing"]}\n' };
+    const review = plan(current, files);
+    const result = applyLibraryUpdatePlan(review, {
+      portableFiles: files,
+      historyRoot: stateRoot,
+    });
+
+    expect(existsSync(path.join(current.workspace, ".dotagents", "library-update-journal.json"))).toBe(false);
+    expect(existsSync(path.join(current.workspace, ".dotagents", "history"))).toBe(false);
+    expect(listOperationHistory(stateRoot)).toMatchObject([
+      expect.objectContaining({ id: result.historyId, target_root: current.workspace }),
+    ]);
+  });
+
+  it("removes external history when an interrupted transaction is rolled back", () => {
+    const current = fixture();
+    const stateRoot = path.join(current.root, "device-state");
+    const files = { "skills.json": '{"skills":["skills/writing"]}\n' };
+    const review = plan(current, files);
+    const result = applyLibraryUpdatePlan(review, { portableFiles: files, historyRoot: stateRoot });
+    const operation = review.operations.find((entry) => entry.path === "skills/writing");
+    if (!operation) throw new Error("fixture produced no skill operation");
+
+    const journalPath = libraryUpdateJournalPath(current.workspace);
+    writeFileSync(
+      journalPath,
+      JSON.stringify({
+        kind: "library-update",
+        schemaVersion: 1,
+        planId: review.planId,
+        phase: "applying",
+        historyId: result.historyId,
+        historyRoot: stateRoot,
+        entries: [
+          {
+            operation,
+            stagePath: `${operation.target}.dotagents-stage-recovery-test`,
+            backupPath: `${operation.target}.dotagents-backup-recovery-test`,
+            hadPrevious: false,
+            status: "applied",
+          },
+        ],
+      }),
+    );
+
+    expect(recoverLibraryUpdate(journalPath)).toBe(true);
+    expect(existsSync(operation.target)).toBe(false);
+    expect(listOperationHistory(stateRoot)).toEqual([]);
   });
 
   it("creates an absent reviewed workspace but rejects a root that appeared after review", () => {

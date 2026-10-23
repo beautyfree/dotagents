@@ -1,6 +1,6 @@
 {
   "name": "dotagents",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Carry your AI-agent skills and setup across machines with a portable, Git-backed library",
   "license": "MIT",
   "repository": {
